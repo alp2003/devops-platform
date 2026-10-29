@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: "v8.30.1"
+  TRIVY_VERSION: "0.76.1"
+  TERRAFORM_VERSION: "1.17.1"
+
+jobs:
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: gitleaks (full history)
+        run: |
+          docker run --rm -v "$PWD:/repo" "zricethezav/gitleaks:${GITLEAKS_VERSION}" \
+            detect --source /repo --redact --no-color -v
+
+  terraform:
+    name: Terraform checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: terraform fmt
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src "hashicorp/terraform:${TERRAFORM_VERSION}" \
+            fmt -check -recursive -diff infra
+      - name: terraform validate
+        run: |
+          for d in infra/*/; do
+            [ -f "${d}main.tf" ] || continue
+            echo "::group::${d}"
+            docker run --rm -v "$PWD:/src" -w "/src/${d}" "hashicorp/terraform:${TERRAFORM_VERSION}" \
+              init -backend=false -input=false
+            docker run --rm -v "$PWD:/src" -w "/src/${d}" "hashicorp/terraform:${TERRAFORM_VERSION}" \
+              validate
+            echo "::endgroup::"
+          done
+      - name: trivy config scan (infra)
+        run: |
+          docker run --rm -v "$PWD:/src" "aquasec/trivy:${TRIVY_VERSION}" \
+            config --exit-code 1 --ignorefile /src/.trivyignore /src/infra
+
+  chart-checks:
+    name: Chart lint and scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: helm lint charts/web
+      - run: helm template web charts/web > /dev/null
+      - name: trivy config scan (chart)
+        run: |
+          docker run --rm -v "$PWD:/src" "aquasec/trivy:${TRIVY_VERSION}" \
+            config --exit-code 1 --ignorefile /src/.trivyignore /src/charts/web

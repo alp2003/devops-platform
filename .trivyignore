@@ -1,0 +1,5 @@
+# Namespace is set at deploy time by ArgoCD, not in the chart
+KSV-0110
+
+# Docker Hub allowed for the course; production would use a mirrored private registry (ECR)
+KSV-0125
