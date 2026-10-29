@@ -3,3 +3,15 @@ KSV-0110
 
 # Docker Hub allowed for the course; production would use a mirrored private registry (ECR)
 KSV-0125
+
+# --- infra/eks: accepted risks (reviewed 2026-10-29) ---
+# AWS-0040/0041: public EKS endpoint restricted to admin /32 (validated in variables.tf)
+# Production: private endpoint + VPN/SSM
+AWS-0040
+AWS-0041
+
+# AWS-0104: nodes need egress to ECR/AWS APIs. Production: VPC endpoints + egress firewall/NetworkPolicies
+AWS-0104
+
+# AWS-0038: api/audit/authenticator logs enabled; controllerManager/scheduler skipped (noise/cost)
+AWS-0038
