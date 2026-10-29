@@ -65,6 +65,12 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - run: helm lint charts/web
       - run: helm template web charts/web > /dev/null
+      - name: render every environment
+        run: |
+          for env in deploy/envs/*/; do
+            echo "rendering ${env}"
+            helm template web charts/web -f "${env}values.yaml" > /dev/null
+          done
       - name: trivy config scan (chart)
         run: |
           docker run --rm -v "$PWD:/src" "aquasec/trivy:${TRIVY_VERSION}" \

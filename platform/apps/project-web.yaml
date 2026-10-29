@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: web
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"   # create the project before the apps that use it
+spec:
+  description: Web application (dev + prod)
+  sourceRepos:
+    - https://github.com/alp2003/devops-platform.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: web-dev
+    - server: https://kubernetes.default.svc
+      namespace: web-prod
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: apps
+      kind: Deployment
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: ConfigMap

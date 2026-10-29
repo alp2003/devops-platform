@@ -1,0 +1,5 @@
+# Environment: dev. CI updates image.tag automatically (Phase 4).
+replicaCount: 1
+
+image:
+  tag: "1.28-alpine"

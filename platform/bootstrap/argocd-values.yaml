@@ -1,0 +1,8 @@
+# Minimal ArgoCD for the lab
+dex:
+  enabled: false        # no SSO yet; we log in as admin via port-forward
+notifications:
+  enabled: false        # not needed yet; saves memory
+configs:
+  params:
+    application.namespaces: ""   # Applications only in the argocd namespace
