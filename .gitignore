@@ -13,6 +13,7 @@ tfplan
 *.tfplan
 crash.log
 *.tfvars
+/*.tfvars
 !example.tfvars
 
 # Python

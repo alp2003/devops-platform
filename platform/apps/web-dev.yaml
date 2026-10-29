@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: web
+  source:
+    repoURL: https://github.com/alp2003/devops-platform.git
+    targetRevision: main
+    path: charts/web
+    helm:
+      releaseName: web
+      valueFiles:
+        - ../../deploy/envs/dev/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: web-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/enforce-version: latest
