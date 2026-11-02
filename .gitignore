@@ -25,5 +25,3 @@ __pycache__/
 *.swo
 *~
 .DS_Store
-scripts/up.sh
-scripts/down.sh
