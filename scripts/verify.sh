@@ -132,8 +132,29 @@ fi
 section "Alertmanager"
 if pf monitoring kps-kube-prometheus-stack-alertmanager 19093 9093; then
   receivers=$(curl -s http://localhost:19093/api/v2/receivers | jq -r '.[].name' | grep -vx null || true)
-  [ -n "$receivers" ] && pass "receivers configured: $(echo "$receivers" | tr '\n' ' ')" \
-    || warn "only the 'null' receiver: alerts are evaluated but delivered nowhere"
+  if [ -z "$receivers" ]; then
+    warn "only the 'null' receiver: alerts are evaluated but delivered nowhere"
+  else
+    pass "receivers configured: $(tr '\n' ' ' <<< "$receivers")"
+    # End-to-end: push a test alert and check that Alertmanager delivered it without errors
+    metric() { curl -s http://localhost:19093/metrics | awk -v m="$1" '$1 ~ "^"m"\\{.*integration=\"telegram\"" {s+=$2} END {print s+0}'; }
+    sent_before=$(metric alertmanager_notifications_total)
+    failed_before=$(metric alertmanager_notifications_failed_total)
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ); ends=$(date -u -d '+3 minutes' +%Y-%m-%dT%H:%M:%SZ)
+    curl -s -o /dev/null -XPOST -H 'Content-Type: application/json' http://localhost:19093/api/v2/alerts \
+      -d "[{\"labels\":{\"alertname\":\"VerifyTestAlert\",\"severity\":\"warning\",\"namespace\":\"verify\"},\"annotations\":{\"summary\":\"End-to-end test from verify.sh at $now\"},\"startsAt\":\"$now\",\"endsAt\":\"$ends\"}]"
+    delivered=0
+    for _ in $(seq 1 30); do   # group_wait is 30s, so allow up to 60s
+      sleep 2
+      [ "$(metric alertmanager_notifications_total)" -gt "$sent_before" ] && { delivered=1; break; }
+    done
+    failed_after=$(metric alertmanager_notifications_failed_total)
+    if [ "$delivered" -eq 1 ] && [ "$failed_after" -eq "$failed_before" ]; then
+      pass "test alert delivered to Telegram (check your phone)"
+    else
+      fail "test alert not delivered (sent: $sent_before→$(metric alertmanager_notifications_total), failed: $failed_before→$failed_after)"
+    fi
+  fi
 else
   fail "could not reach Alertmanager"
 fi
