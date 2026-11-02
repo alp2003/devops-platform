@@ -1,0 +1,22 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-registries
+  annotations:
+    policies.kyverno.io/description: "App namespaces may only pull from approved registries."
+spec:
+  background: true
+  rules:
+    - name: approved-registries
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [web-dev, web-prod]
+      validate:
+        failureAction: Audit
+        message: "Image registry not approved. Use the company ECR."
+        pattern:
+          spec:
+            containers:
+              - image: "*.dkr.ecr.us-east-1.amazonaws.com/* | nginxinc/*"

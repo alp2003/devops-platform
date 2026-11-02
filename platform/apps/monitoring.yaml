@@ -1,0 +1,50 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 92.17.0
+    helm:
+      releaseName: kps
+      valuesObject:
+        grafana:
+          additionalDataSources:
+            - name: Loki
+              type: loki
+              url: http://loki.monitoring.svc:3100
+              access: proxy
+        prometheus:
+          prometheusSpec:
+            retention: 2d
+            ruleSelectorNilUsesHelmValues: false
+            serviceMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelectorNilUsesHelmValues: false
+            resources:
+              requests: { memory: 512Mi }
+              limits: { memory: 1Gi }
+        # EKS manages the control plane: these components can't be scraped
+        kubeEtcd: { enabled: false }
+        kubeScheduler: { enabled: false }
+        kubeControllerManager: { enabled: false }
+        kubeProxy: { enabled: false }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    managedNamespaceMetadata:
+      labels:
+        # node-exporter needs hostNetwork/hostPID. Documented exception.
+        pod-security.kubernetes.io/enforce: privileged
