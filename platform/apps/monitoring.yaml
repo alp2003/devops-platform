@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/argoproj.io/application_v1alpha1.json
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -5,6 +6,7 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -35,6 +37,46 @@ spec:
             resources:
               requests: { memory: 512Mi }
               limits: { memory: 1Gi }
+        alertmanager:
+          alertmanagerSpec:
+            # Mounted at /etc/alertmanager/secrets/alertmanager-telegram/ (created by up.sh, not in Git)
+            secrets:
+              - alertmanager-telegram
+          config:
+            global:
+              resolve_timeout: 5m
+            route:
+              receiver: telegram
+              group_by: [alertname, namespace]
+              group_wait: 30s
+              group_interval: 5m
+              repeat_interval: 4h
+              routes:
+                # Watchdog fires constantly by design: never send it to chat.
+                # Next step: route it to a dead man's switch (e.g. healthchecks.io).
+                - receiver: "null"
+                  matchers: ['alertname = "Watchdog"']
+                - receiver: "null"
+                  matchers: ['alertname = "InfoInhibitor"']
+            inhibit_rules:
+              # A critical alert silences warning/info alerts for the same thing
+              - source_matchers: ['severity = "critical"']
+                target_matchers: ['severity =~ "warning|info"']
+                equal: [namespace, alertname]
+              - source_matchers: ['severity = "warning"']
+                target_matchers: ['severity = "info"']
+                equal: [namespace, alertname]
+              - source_matchers: ['alertname = "InfoInhibitor"']
+                target_matchers: ['severity = "info"']
+                equal: [namespace]
+            receivers:
+              - name: "null"
+              - name: telegram
+                telegram_configs:
+                  - bot_token_file: /etc/alertmanager/secrets/alertmanager-telegram/bot-token
+                    chat_id: -5346321343
+                    parse_mode: HTML
+                    send_resolved: true
         # EKS manages the control plane: these components can't be scraped
         kubeEtcd: { enabled: false }
         kubeScheduler: { enabled: false }
