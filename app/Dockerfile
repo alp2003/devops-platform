@@ -26,9 +26,10 @@ LABEL org.opencontainers.image.title="web" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${APP_COMMIT}" \
       org.opencontainers.image.source="https://github.com/alp2003/devops-platform"
-# pip is a build tool: the app doesn't need it at runtime, and it carries its own vendored libraries
+# pip is a build tool: the app doesn't need it at runtime, and it carries its own vendored libraries.
+# Ask Python where ensurepip lives instead of hardcoding the version in the path.
 RUN python -m pip uninstall -y pip \
- && rm -rf /usr/local/lib/python3.14/ensurepip
+ && rm -rf "$(python -c 'import ensurepip, os; print(os.path.dirname(ensurepip.__file__))')"
 COPY --from=build /deps /deps
 COPY main.py /app/main.py
 USER 10001:10001
