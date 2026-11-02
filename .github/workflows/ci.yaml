@@ -75,3 +75,12 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/src" "aquasec/trivy:${TRIVY_VERSION}" \
             config --exit-code 1 --ignorefile /src/.trivyignore /src/charts/web
+      - name: kyverno policy check (every environment)
+        run: |
+          for env in deploy/envs/*/; do
+            name=$(basename "$env")
+            helm template web charts/web -f "${env}values.yaml" > "/tmp/web-${name}.yaml"
+            echo "== ${name}"
+            docker run --rm -v "$PWD:/src" -v /tmp:/manifests ghcr.io/kyverno/kyverno-cli:v1.19.2 \
+              apply /src/platform/policies/ --resource "/manifests/web-${name}.yaml" --audit-warn
+          done
