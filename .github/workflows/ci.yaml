@@ -92,3 +92,46 @@ jobs:
             echo "$bad"
             exit 1
           fi
+
+  app:
+    name: App build and test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: unit tests (same Python image as production)
+        run: docker build --target test app
+
+      - name: build image
+        run: |
+          docker build \
+            --build-arg APP_VERSION=0.0.0-ci \
+            --build-arg APP_COMMIT="${GITHUB_SHA::7}" \
+            -t web:ci app
+
+      - name: smoke test (hardened, like the cluster)
+        run: |
+          docker run -d --name web \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            -p 8080:8080 web:ci
+          for _ in $(seq 1 20); do curl -fsS localhost:8080/healthz >/dev/null && break; sleep 1; done
+          curl -fsS localhost:8080/healthz
+          commit=$(curl -fsS localhost:8080/version | jq -r .commit)
+          echo "image reports commit: ${commit}"
+          test "${commit}" = "${GITHUB_SHA::7}"
+          metrics=$(curl -fsS localhost:8080/metrics)
+          grep -q 'web_build_info{' <<< "${metrics}"
+          start=$(date +%s); docker stop web; took=$(( $(date +%s) - start ))
+          echo "graceful stop took ${took}s"
+          test "${took}" -lt 5
+
+      - name: container logs (on failure)
+        if: failure()
+        run: docker logs web || true
+
+      - name: trivy image scan
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy:${TRIVY_VERSION}" \
+            image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed web:ci
