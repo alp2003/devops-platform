@@ -84,3 +84,11 @@ jobs:
             docker run --rm -v "$PWD:/src" -v /tmp:/manifests ghcr.io/kyverno/kyverno-cli:v1.19.2 \
               apply /src/platform/policies/ --resource "/manifests/web-${name}.yaml" --audit-warn
           done
+      - name: root app path contains only ArgoCD resources
+        run: |
+          bad=$(grep -rLE '^kind: (Application|AppProject)$' platform/apps/ || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Only Application/AppProject files belong in platform/apps/:"
+            echo "$bad"
+            exit 1
+          fi
