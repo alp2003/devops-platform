@@ -123,6 +123,8 @@ jobs:
           test "${commit}" = "${GITHUB_SHA::7}"
           metrics=$(curl -fsS localhost:8080/metrics)
           grep -q 'web_build_info{' <<< "${metrics}"
+          docker run --rm --entrypoint python web:ci -c "import importlib.util, sys; sys.exit(any(importlib.util.find_spec(m) for m in ('pip', 'ensurepip')))"
+          echo "no pip/ensurepip in runtime image"
           start=$(date +%s); docker stop web; took=$(( $(date +%s) - start ))
           echo "graceful stop took ${took}s"
           test "${took}" -lt 5
