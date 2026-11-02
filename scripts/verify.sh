@@ -177,13 +177,15 @@ unset gpass
 
 # ---------------------------------------------------------------- error logs
 section "Errors in platform logs (last 10 min, informational)"
+found_errors=0
 for ns in argocd kyverno falco monitoring; do
   for p in $(kubectl get pods -n "$ns" --field-selector=status.phase=Running -o name); do
     n=$(kubectl logs -n "$ns" "$p" --all-containers --since=10m 2>/dev/null \
-      | grep -ciE 'level=error|"level":"error"|\berror\b' || true)
-    [ "$n" -gt 0 ] && echo "  · $ns/${p#pod/}: $n error lines"
+      | grep -ciE 'level=(error|fatal|panic)|"level": ?"(error|fatal|panic)"|^E[0-9]{4} ' || true)
+    if [ "$n" -gt 0 ]; then echo "  · $ns/${p#pod/}: $n error lines"; found_errors=1; fi
   done
 done
+[ "$found_errors" -eq 0 ] && echo "  ✅ no error-level log lines"
 
 # ---------------------------------------------------------------- summary
 echo
