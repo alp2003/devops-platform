@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# ---- build stage: install dependencies only ----
+FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966 AS build
+WORKDIR /src
+COPY requirements.txt .
+RUN pip install --no-cache-dir --target /deps -r requirements.txt
+
+# ---- runtime stage: no pip cache, no build tools, no tests ----
+FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
+ARG APP_VERSION=dev
+ARG APP_COMMIT=unknown
+ENV APP_VERSION=${APP_VERSION} \
+    APP_COMMIT=${APP_COMMIT} \
+    PYTHONPATH=/deps \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+LABEL org.opencontainers.image.title="web" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${APP_COMMIT}" \
+      org.opencontainers.image.source="https://github.com/alp2003/devops-platform"
+# pip is a build tool: the app doesn't need it at runtime, and it carries its own vendored libraries
+RUN python -m pip uninstall -y pip \
+ && rm -rf /usr/local/lib/python3.14/ensurepip
+COPY --from=build /deps /deps
+COPY main.py /app/main.py
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["python", "/app/main.py"]

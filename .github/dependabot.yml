@@ -6,3 +6,17 @@ updates:
       interval: weekly
     commit-message:
       prefix: "deps"
+
+  - package-ecosystem: docker
+    directory: /app
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: pip
+    directory: /app
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
