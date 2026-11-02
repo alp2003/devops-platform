@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 # ---- build stage: install dependencies only ----
-FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966 AS build
+FROM python:3.15.0-slim-trixie@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS build
 WORKDIR /src
 COPY requirements.txt .
 RUN pip install --no-cache-dir --target /deps -r requirements.txt
 
 # ---- test stage: same Python as production; only built with --target test ----
-FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966 AS test
+FROM python:3.15.0-slim-trixie@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58 AS test
 WORKDIR /src
 COPY requirements.txt requirements-dev.txt ./
 RUN pip install --no-cache-dir -r requirements-dev.txt
@@ -14,7 +14,7 @@ COPY main.py test_main.py ./
 RUN python -m pytest -q -p no:cacheprovider
 
 # ---- runtime stage: no pip cache, no build tools, no tests ----
-FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966
+FROM python:3.15.0-slim-trixie@sha256:f5b92f2a669a4c347044f29367f31983280b648250ca94dea66f98c53bc87e58
 ARG APP_VERSION=dev
 ARG APP_COMMIT=unknown
 ENV APP_VERSION=${APP_VERSION} \
