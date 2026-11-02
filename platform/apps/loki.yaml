@@ -35,6 +35,16 @@ spec:
           replicas: 1
           persistence:
             enabled: false     # lab: no EBS volumes; logs lost on restart
+          # Read-only root FS: Loki needs one writable directory for chunks/index/rules
+          extraVolumes:
+            - name: loki-data
+              emptyDir: {}
+          extraVolumeMounts:
+            - name: loki-data
+              mountPath: /var/loki
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
         backend: { replicas: 0 }
         read: { replicas: 0 }
         write: { replicas: 0 }
