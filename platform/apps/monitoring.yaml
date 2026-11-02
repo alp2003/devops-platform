@@ -17,6 +17,10 @@ spec:
       releaseName: kps
       valuesObject:
         grafana:
+          admin:
+            existingSecret: grafana-admin
+            userKey: admin-user
+            passwordKey: admin-password
           additionalDataSources:
             - name: Loki
               type: loki

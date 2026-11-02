@@ -20,7 +20,11 @@ cd "$ROOT"
 helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
 helm upgrade --install argocd argo/argo-cd --version 10.11.6 \
   -n argocd --create-namespace -f platform/bootstrap/argocd-values.yaml --wait --timeout 10m
-
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+kubectl get secret grafana-admin -n monitoring >/dev/null 2>&1 || \
+  kubectl create secret generic grafana-admin -n monitoring \
+    --from-literal=admin-user=admin \
+    --from-literal=admin-password="$(openssl rand -base64 24)"
 echo "== 4/4 Root application"
 kubectl apply -f platform/root.yaml
 
