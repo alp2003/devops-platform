@@ -1,0 +1,173 @@
+# Picked up by kube-prometheus-stack's Grafana sidecar (label grafana_dashboard: "1")
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-web-releases
+  labels:
+    grafana_dashboard: "1"
+data:
+  web-releases.json: |
+    {
+      "title": "Web releases",
+      "uid": "web-releases",
+      "tags": [
+        "web",
+        "release"
+      ],
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "table",
+          "title": "Running version per environment",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 6
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (namespace, version, commit) (web_build_info)",
+              "refId": "A",
+              "legendFormat": "",
+              "instant": true,
+              "range": false,
+              "format": "table"
+            }
+          ],
+          "transformations": [
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true,
+                  "Value": true
+                },
+                "renameByName": {
+                  "namespace": "Environment",
+                  "version": "Version",
+                  "commit": "Commit"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Pods scraped",
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 6
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (namespace) (up{service=\"web\"})",
+              "refId": "A",
+              "legendFormat": "{{namespace}}"
+            }
+          ],
+          "options": {
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ]
+            },
+            "colorMode": "value",
+            "graphMode": "none"
+          }
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Version history (a line per version: promotions and rollbacks show as switches)",
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "max by (namespace, version) (web_build_info)",
+              "refId": "A",
+              "legendFormat": "{{namespace}} {{version}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineWidth": 3,
+                "spanNulls": false
+              },
+              "min": 0,
+              "max": 1.2
+            }
+          }
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Requests/s by environment (probes excluded)",
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "expr": "sum by (namespace, code) (rate(web_http_requests_total{path!=\"/healthz\"}[5m]))",
+              "refId": "A",
+              "legendFormat": "{{namespace}} {{code}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps"
+            }
+          }
+        }
+      ]
+    }
