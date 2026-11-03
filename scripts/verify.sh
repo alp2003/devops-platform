@@ -4,6 +4,8 @@
 # Post-deploy verification for the devops-platform cluster (kind or EKS).
 # Checks that every component is not just "Healthy" but actually doing its job.
 # Exit code: 0 = all checks passed (warnings allowed), 1 = at least one failure.
+# Run it ~5 minutes after every ArgoCD app is Synced/Healthy: install-time noise (hook jobs,
+# the operator's webhook certificate race) is gone by then. See README.md.
 set -uo pipefail
 
 PASS=0; FAIL=0; WARN=0
@@ -37,8 +39,26 @@ not_ready=$(kubectl get nodes --no-headers | awk '$2 != "Ready"' | wc -l)
 total=$(kubectl get nodes --no-headers | wc -l)
 [ "$not_ready" -eq 0 ] && pass "$total/$total nodes Ready" || fail "$not_ready node(s) not Ready"
 
-bad_pods=$(kubectl get pods -A --no-headers | grep -vE 'Running|Completed' || true)
+# A pod counts as broken if it is not Running/Succeeded, EXCEPT:
+#  - Job pods (Helm hooks, one-off tasks) younger than 5 min: they are meant to start and
+#    stop. A FAILED Job pod, or one stuck for 5+ min, still counts.
+#  - pods younger than 60s: they are still being scheduled or pulling their image.
+# Those are listed as "starting" for information, without failing the run.
+# shellcheck disable=SC2016  # $now is a jq variable, not a shell one
+pod_filter='.items[]
+  | select(.status.phase != "Running" and .status.phase != "Succeeded")
+  | ([.metadata.ownerReferences[]?.kind] | index("Job") != null) as $job
+  | ($now - (.metadata.creationTimestamp | fromdateiso8601)) as $age
+  | if ($job and .status.phase != "Failed" and $age < 300) or $age < 60
+    then (if $want == "starting" then "\(.metadata.namespace)/\(.metadata.name) \(.status.phase) (\($age)s\(if $job then ", job" else "" end))" else empty end)
+    else (if $want == "bad" then "\(.metadata.namespace)/\(.metadata.name) \(.status.phase)" else empty end)
+    end'
+pods_json=$(kubectl get pods -A -o json)
+now=$(date -u +%s)
+bad_pods=$(jq -r --argjson now "$now" --arg want bad "$pod_filter" <<< "$pods_json")
+starting=$(jq -r --argjson now "$now" --arg want starting "$pod_filter" <<< "$pods_json")
 [ -z "$bad_pods" ] && pass "all pods Running/Completed" || { fail "pods not running:"; indent <<< "$bad_pods"; }
+[ -z "$starting" ] || { echo "  · still starting (not counted):"; indent <<< "$starting"; }
 
 unready=$(kubectl get pods -A --no-headers | awk '$4=="Running" {split($3,a,"/"); if (a[1]!=a[2]) print $1"/"$2" "$3}')
 [ -z "$unready" ] && pass "all running containers ready" || { fail "containers not ready:"; indent <<< "$unready"; }
