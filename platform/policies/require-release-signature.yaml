@@ -1,0 +1,41 @@
+# Images from our ECR repository may run in web-dev/web-prod only if they carry a
+# cosign keyless signature made by our release workflow for a v* tag (GitHub OIDC,
+# recorded in the public Rekor log). Unsigned or foreign-signed images are DENIED.
+# Kyverno reads the signatures from ECR with the Pod Identity role in infra/eks/kyverno-ecr.tf.
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: require-release-signature
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail # if Kyverno can't verify (ECR/Rekor unreachable), the pod is rejected
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [web-dev, web-prod]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchImageReferences:
+    - glob: "351323458847.dkr.ecr.us-east-1.amazonaws.com/devops-platform/*"
+  credentials:
+    providers: [amazon]
+  attestors:
+    - name: release
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subjectRegExp: '^https://github\.com/alp2003/devops-platform/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$'
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        images.containers.map(image, verifyImageSignatures(image, [attestors.release])).all(e, e > 0)
+      message: "Image must be signed by alp2003/devops-platform release.yaml for a v* release tag"
