@@ -171,6 +171,14 @@ if pf monitoring kps-kube-prometheus-stack-prometheus 19090 9090; then
   [ "$rules" -gt 0 ] && pass "$rules alerting/recording rules loaded" || fail "no rules loaded"
   firing=$(curl -s http://localhost:19090/api/v1/alerts | jq -r '.data.alerts[] | select(.state=="firing") | .labels.alertname' | sort -u)
   grep -qx Watchdog <<< "$firing" && pass "Watchdog firing (alert pipeline alive)" || fail "Watchdog not firing"
+  # The app itself is scraped, and Prometheus sees the version each environment runs
+  for ns in web-dev web-prod; do
+    want=$(kubectl get deploy web -n "$ns" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}' 2>/dev/null)
+    ups=$(curl -s -G http://localhost:19090/api/v1/query --data-urlencode "query=sum(up{namespace=\"$ns\",service=\"web\"})" | jq -r '.data.result[0].value[1] // 0')
+    seen=$(curl -s -G http://localhost:19090/api/v1/query --data-urlencode "query=web_build_info{namespace=\"$ns\"}" | jq -r '[.data.result[].metric.version] | unique | join(",")')
+    [ "$ups" -gt 0 ] && [ "$seen" = "$want" ] && pass "$ns: $ups app target(s) scraped, web_build_info version=$seen" \
+      || fail "$ns: app scrape: up=$ups, web_build_info version='${seen}' (want $want)"
+  done
   others=$(echo "$firing" | grep -vxE 'Watchdog|InfoInhibitor' || true)
   [ -z "$others" ] && pass "no other alerts firing" || { warn "other alerts firing:"; indent <<< "$others"; }
 else
@@ -247,15 +255,22 @@ unset gpass
 
 # ---------------------------------------------------------------- error logs
 section "Errors in platform logs (last 10 min, informational)"
-found_errors=0
-for ns in argocd kyverno falco monitoring web-dev web-prod; do
-  for p in $(kubectl get pods -n "$ns" --field-selector=status.phase=Running -o name); do
-    n=$(kubectl logs -n "$ns" "$p" --all-containers --since=10m 2>/dev/null \
-      | grep -ciE 'level=(error|fatal|panic)|"level": ?"(error|fatal|panic)"|^E[0-9]{4} ' || true)
-    if [ "$n" -gt 0 ]; then echo "  · $ns/${p#pod/}: $n error lines"; found_errors=1; fi
-  done
-done
-[ "$found_errors" -eq 0 ] && echo "  ✅ no error-level log lines"
+# One API call lists the pods, then 8 log reads run in parallel, each with a timeout.
+# Sequentially this took ~11 min on EKS (one slow round trip per pod).
+scan_pod_errors() { # namespace pod
+  local n
+  n=$(kubectl logs -n "$1" "$2" --all-containers --since=10m --request-timeout=20s 2>/dev/null \
+    | grep -ciE 'level=(error|fatal|panic)|"level": ?"(error|fatal|panic)"|^E[0-9]{4} ' || true)
+  [ "${n:-0}" -gt 0 ] && echo "  · $1/$2: $n error lines"
+  return 0
+}
+export -f scan_pod_errors
+pods=$(kubectl get pods -A --field-selector=status.phase=Running \
+  -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' \
+  | awk '$1 ~ /^(argocd|kyverno|falco|monitoring|web-dev|web-prod)$/')
+# shellcheck disable=SC2016  # $1/$2 are expanded by the inner bash, not here
+errors=$(xargs -r -P 8 -L 1 bash -c 'scan_pod_errors "$1" "$2"' _ <<< "$pods" | sort)
+[ -z "$errors" ] && echo "  ✅ no error-level log lines ($(grep -c . <<< "$pods") pods scanned)" || echo "$errors"
 
 # ---------------------------------------------------------------- summary
 echo
