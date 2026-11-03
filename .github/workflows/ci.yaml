@@ -142,4 +142,4 @@ jobs:
         if: always()
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy:${TRIVY_VERSION}" \
-            image --exit-code 0 --severity HIGH,CRITICAL --format table "${ECR_REPOSITORY}:${VERSION}"
+            image --exit-code 0 --severity HIGH,CRITICAL --format table web:ci
