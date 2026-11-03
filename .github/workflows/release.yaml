@@ -84,6 +84,12 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy:${TRIVY_VERSION}" \
             image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "${ECR_REPOSITORY}:${VERSION}"
 
+      - name: trivy report (unfixed, informational)
+        if: always()
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy:${TRIVY_VERSION}" \
+            image --exit-code 0 --severity HIGH,CRITICAL --format table "${ECR_REPOSITORY}:${VERSION}"
+
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}

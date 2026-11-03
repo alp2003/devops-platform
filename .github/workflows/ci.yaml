@@ -137,3 +137,9 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy:${TRIVY_VERSION}" \
             image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed web:ci
+
+      - name: trivy report (unfixed, informational)
+        if: always()
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "aquasec/trivy:${TRIVY_VERSION}" \
+            image --exit-code 0 --severity HIGH,CRITICAL --format table "${ECR_REPOSITORY}:${VERSION}"
