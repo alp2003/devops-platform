@@ -17,8 +17,8 @@ spec:
               namespaces: [web-dev, web-prod]
       validate:
         failureAction: Audit
-        message: "Image registry not approved. Use the company ECR."
+        message: "Image registry not approved. Use the devops-platform ECR repository."
         pattern:
           spec:
             containers:
-              - image: "*.dkr.ecr.us-east-1.amazonaws.com/* | nginxinc/*"
+              - image: "351323458847.dkr.ecr.us-east-1.amazonaws.com/devops-platform/*"
