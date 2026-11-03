@@ -46,6 +46,32 @@ unready=$(kubectl get pods -A --no-headers | awk '$4=="Running" {split($3,a,"/")
 restarts=$(kubectl get pods -A --no-headers | awk '$5 > 0 {print $1"/"$2" restarts="$5}')
 [ -z "$restarts" ] && pass "no container restarts" || { warn "pods with restarts (check if recent):"; indent <<< "$restarts"; }
 
+# ---------------------------------------------------------------- api endpoint
+section "API endpoint"
+# Every IP the API name resolves to must answer; one dead IP makes ~half of all kubectl calls hang ~16s.
+api_host=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'); api_host="${api_host#https://}"
+if [[ "$api_host" == *.eks.amazonaws.com ]] && command -v dig >/dev/null; then
+  # dig asks DNS directly, so the real IPs are tested even when /etc/hosts pins one
+  mapfile -t api_ips < <(dig +short "$api_host" | grep -E '^[0-9.]+$' | sort -u)
+  dead=()
+  for ip in "${api_ips[@]}"; do
+    code=$(curl -sk --noproxy '*' -o /dev/null --connect-timeout 5 --max-time 10 --resolve "$api_host:443:$ip" \
+      -w '%{http_code}' "https://$api_host/livez" || true)
+    [ "${code:-000}" = "000" ] && dead+=("$ip")
+  done
+  if [ "${#api_ips[@]}" -eq 0 ]; then
+    fail "could not resolve $api_host"
+  elif [ "${#dead[@]}" -eq 0 ]; then
+    pass "all ${#api_ips[@]} endpoint IPs reachable"
+  elif grep -q 'eks-endpoint-pin:' /etc/hosts; then
+    warn "unreachable endpoint IP(s) ${dead[*]}, handled by the /etc/hosts pin"
+  else
+    fail "unreachable endpoint IP(s) ${dead[*]}: run scripts/eks-endpoint-pin.sh pin"
+  fi
+else
+  warn "skipped endpoint IP check (not EKS, or 'dig' missing)"
+fi
+
 # ---------------------------------------------------------------- argocd
 section "ArgoCD"
 apps=$(kubectl get applications -n argocd -o json)
@@ -196,23 +222,34 @@ if pf monitoring kps-kube-prometheus-stack-alertmanager 19093 9093; then
     warn "only the 'null' receiver: alerts are evaluated but delivered nowhere"
   else
     pass "receivers configured: $(tr '\n' ' ' <<< "$receivers")"
-    # End-to-end: push a test alert and check that Alertmanager delivered it without errors
+    # End-to-end: push a test alert and watch Alertmanager's per-request counters for Telegram.
+    #  - requests_failed_total rises on EVERY failed attempt (e.g. bad token -> 404), unlike
+    #    notifications_failed_total, which waits until all retries are exhausted (minutes).
+    #  - a unique namespace label puts each run in its own alert group, so a run shortly
+    #    after another is not deduplicated into the still-active alert.
     metric() { curl -s http://localhost:19093/metrics | awk -v m="$1" '$1 ~ "^"m"\\{.*integration=\"telegram\"" {s+=$2} END {print s+0}'; }
-    sent_before=$(metric alertmanager_notifications_total)
-    failed_before=$(metric alertmanager_notifications_failed_total)
+    req_before=$(metric alertmanager_notification_requests_total)
+    bad_before=$(metric alertmanager_notification_requests_failed_total)
+    run="verify-$(date +%s)"
     now=$(date -u +%Y-%m-%dT%H:%M:%SZ); ends=$(date -u -d '+3 minutes' +%Y-%m-%dT%H:%M:%SZ)
     curl -s -o /dev/null -XPOST -H 'Content-Type: application/json' http://localhost:19093/api/v2/alerts \
-      -d "[{\"labels\":{\"alertname\":\"VerifyTestAlert\",\"severity\":\"warning\",\"namespace\":\"verify\"},\"annotations\":{\"summary\":\"End-to-end test from verify.sh at $now\"},\"startsAt\":\"$now\",\"endsAt\":\"$ends\"}]"
-    delivered=0
+      -d "[{\"labels\":{\"alertname\":\"VerifyTestAlert\",\"severity\":\"warning\",\"namespace\":\"$run\"},\"annotations\":{\"summary\":\"End-to-end test from verify.sh at $now\"},\"startsAt\":\"$now\",\"endsAt\":\"$ends\"}]"
+    ok=0; bad=0
     for _ in $(seq 1 30); do   # group_wait is 30s, so allow up to 60s
       sleep 2
-      [ "$(metric alertmanager_notifications_total)" -gt "$sent_before" ] && { delivered=1; break; }
+      req=$(( $(metric alertmanager_notification_requests_total) - req_before ))
+      bad=$(( $(metric alertmanager_notification_requests_failed_total) - bad_before ))
+      ok=$(( req - bad ))
+      [ "$ok" -gt 0 ] || [ "$bad" -gt 0 ] && break
     done
-    failed_after=$(metric alertmanager_notifications_failed_total)
-    if [ "$delivered" -eq 1 ] && [ "$failed_after" -eq "$failed_before" ]; then
-      pass "test alert delivered to Telegram (check your phone)"
+    if [ "$ok" -gt 0 ] && [ "$bad" -eq 0 ]; then
+      pass "test alert accepted by Telegram ($run, check the group)"
+    elif [ "$bad" -gt 0 ]; then
+      err=$(kubectl logs -n monitoring alertmanager-kps-kube-prometheus-stack-alertmanager-0 -c alertmanager --since=2m 2>/dev/null \
+        | grep -o 'err="telegram[^"]*"' | tail -1)
+      fail "Telegram rejected the test alert: ${err:-see alertmanager logs} (bad token? recreate monitoring/alertmanager-telegram)"
     else
-      fail "test alert not delivered (sent: $sent_before→$(metric alertmanager_notifications_total), failed: $failed_before→$failed_after)"
+      fail "test alert not sent within 60s ($run)"
     fi
   fi
 else
