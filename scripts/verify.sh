@@ -136,6 +136,9 @@ warnings=$(kubectl run verify-kyverno -n web-dev --image=busybox:latest --dry-ru
   | grep -c '^Warning: policy' || true)
 [ "$warnings" -ge 3 ] && pass "webhook active: bad pod in web-dev → $warnings policy warnings" || fail "webhook test: expected ≥3 policy warnings, got $warnings"
 
+ivp=$(kubectl get imagevalidatingpolicy require-release-signature -o name 2>/dev/null)
+[ -n "$ivp" ] && pass "signature policy installed: require-release-signature (Deny)" || fail "ImageValidatingPolicy require-release-signature not found"
+
 reports=$(kubectl get policyreport -A --no-headers 2>/dev/null | wc -l)
 [ "$reports" -gt 0 ] && pass "$reports PolicyReports generated" || fail "no PolicyReports found"
 

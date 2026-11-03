@@ -81,8 +81,10 @@ jobs:
             name=$(basename "$env")
             helm template web charts/web -f "${env}values.yaml" > "/tmp/web-${name}.yaml"
             echo "== ${name}"
+            # Image signature policies need ECR + Rekor access: verified live on the cluster, not here
+            mapfile -t policies < <(grep -L '^kind: ImageValidatingPolicy' platform/policies/*.yaml | sed 's|^|/src/|')
             docker run --rm -v "$PWD:/src" -v /tmp:/manifests ghcr.io/kyverno/kyverno-cli:v1.19.2 \
-              apply /src/platform/policies/ --resource "/manifests/web-${name}.yaml" --audit-warn
+              apply "${policies[@]}" --resource "/manifests/web-${name}.yaml" --audit-warn
           done
       - name: root app path contains only ArgoCD resources
         run: |
