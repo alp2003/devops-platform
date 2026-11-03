@@ -15,3 +15,7 @@ AWS-0104
 
 # AWS-0038: api/audit/authenticator logs enabled; controllerManager/scheduler skipped (noise/cost)
 AWS-0038
+
+# AWS-0033: ECR uses AWS-managed AES256 encryption. Production: a customer-managed KMS key
+#   for key-level access control and audit. Accepted for the lab (cost/complexity).
+AWS-0033
