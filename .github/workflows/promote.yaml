@@ -1,0 +1,99 @@
+name: promote
+
+# Promote what dev runs to prod, by opening a PR. Nothing is rebuilt: prod gets the
+# exact digest dev was tested with, and Kyverno re-verifies its signature at deploy.
+# Rollback = revert the promotion PR.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version you expect dev to run (e.g. 0.1.1). Guards against promoting something else."
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: promote-prod
+  cancel-in-progress: false
+
+env:
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+jobs:
+  promote:
+    name: Open prod promotion PR
+    runs-on: ubuntu-24.04
+    permissions: {} # all access below comes from the App's short-lived, scoped token
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          repositories: devops-platform
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: true
+
+      - name: copy dev's image to prod
+        env:
+          EXPECTED: ${{ inputs.version }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          [[ "${EXPECTED}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::version must look like 1.2.3, got '${EXPECTED}'"; exit 1; }
+
+          dev_tag=$(yq '.image.tag' deploy/envs/dev/values.yaml)
+          dev_digest=$(yq '.image.digest' deploy/envs/dev/values.yaml)
+          prod_tag=$(yq '.image.tag' deploy/envs/prod/values.yaml)
+          prod_digest=$(yq '.image.digest' deploy/envs/prod/values.yaml)
+          echo "dev:  ${dev_tag} ${dev_digest}"
+          echo "prod: ${prod_tag} ${prod_digest}"
+
+          [[ "${dev_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::dev is not pinned by digest"; exit 1; }
+          [ "${dev_tag}" = "${EXPECTED}" ] || { echo "::error::dev runs ${dev_tag}, not ${EXPECTED}: nothing promoted"; exit 1; }
+          if [ "${dev_digest}" = "${prod_digest}" ]; then
+            echo "::notice::prod already runs ${dev_tag} (${dev_digest}): nothing to do"
+            exit 0
+          fi
+
+          branch="promote/prod-${dev_tag}"
+          git switch -c "${branch}"
+          export TAG="${dev_tag}" DIGEST="${dev_digest}"
+          yq -i '.image.tag = strenv(TAG) | .image.digest = strenv(DIGEST)' deploy/envs/prod/values.yaml
+          git diff
+
+          bot_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git commit -am "deploy(prod): web ${dev_tag}"
+          git push origin "${branch}"
+
+          gh pr create --base main --head "${branch}" \
+            --title "deploy(prod): web ${prod_tag} → ${dev_tag}" \
+            --body-file - <<EOF
+          Promotion requested by @${GITHUB_ACTOR} ([run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})).
+
+          | | Before | After |
+          |---|---|---|
+          | Version | \`${prod_tag}\` | \`${dev_tag}\` |
+          | Digest | \`${prod_digest}\` | \`${dev_digest}\` |
+
+          The digest is copied from dev, so prod runs the exact bytes dev ran. Kyverno re-checks the signature when the pods start.
+
+          Verify before merging:
+          \`\`\`
+          cosign verify ${ECR_REPOSITORY}@${dev_digest} \\
+            --certificate-identity https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yaml@refs/tags/v${dev_tag} \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+
+          **Rollback:** revert this PR. ArgoCD returns prod to \`${prod_tag}\` (\`${prod_digest}\`).
+          EOF

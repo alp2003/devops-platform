@@ -288,6 +288,8 @@ elif pf monitoring kps-grafana 13000 80; then
       [ "$status" = "OK" ] && pass "datasource '$name' healthy" || fail "datasource '$name' status: $status ($(jq -r '.message // empty' <<< "$health"))"
     fi
   done
+  dash=$(curl -s -u "admin:$gpass" "http://localhost:13000/api/dashboards/uid/web-releases" | jq -r '.dashboard.title // empty')
+  [ -n "$dash" ] && pass "dashboard '$dash' provisioned" || fail "dashboard web-releases not found (dashboards app / Grafana sidecar)"
 else
   fail "could not reach Grafana"
 fi
