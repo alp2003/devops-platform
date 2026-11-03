@@ -58,17 +58,66 @@ for app in $(echo "$apps" | jq -r '.items[] | select(.status.sync.status != "Syn
 done
 
 # ---------------------------------------------------------------- web app
-section "Web app (HTTP)"
+section "Web app"
+# The chain we prove, per environment:
+#   git (ArgoCD Synced, above) -> Deployment pins a digest -> every pod runs exactly that digest
+#   -> the image is signed by our release workflow for that version -> the app reports that version
+SIGNER="https://github.com/alp2003/devops-platform/.github/workflows/release.yaml@refs/tags/v"
 port=18080
-for ns in web-dev web-prod; do
-  svc=$(kubectl get svc -n "$ns" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-  svc_port=$(kubectl get svc -n "$ns" -o jsonpath='{.items[0].spec.ports[0].port}' 2>/dev/null)
-  if [ -z "$svc" ]; then fail "$ns: no Service found"; continue; fi
-  if pf "$ns" "$svc" "$port" "$svc_port"; then
-    code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/")
-    [ "$code" = "200" ] && pass "$ns: GET / → $code" || fail "$ns: GET / → $code"
+for env in dev prod; do
+  ns="web-$env"
+  image=$(kubectl get deploy web -n "$ns" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+  if [ -z "$image" ]; then fail "$ns: deployment/web not found"; port=$((port + 1)); continue; fi
+  want_ver=$(kubectl get deploy web -n "$ns" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/version}')
+  digest="${image##*@}"
+
+  if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    pass "$ns: deployment pins ${want_ver} by digest (${digest:7:12}…)"
   else
-    fail "$ns: could not port-forward to svc/$svc"
+    fail "$ns: image not pinned by digest: $image"
+  fi
+
+  # What the kubelet actually pulled, per pod. Must equal the pinned digest.
+  ids=$(kubectl get pods -n "$ns" -l app=web -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].imageID}{"\n"}{end}')
+  npods=$(grep -c . <<< "$ids" || true)
+  wrong=$(awk -v d="$digest" 'NF && $2 !~ ("@" d "$") {print $1" runs "$2}' <<< "$ids")
+  [ "$npods" -gt 0 ] && [ -z "$wrong" ] && pass "$ns: $npods/$npods pods run exactly that digest" \
+    || { fail "$ns: pods not running the pinned digest:"; indent <<< "${wrong:-no pods}"; }
+
+  # Signature: issued to our release workflow, for THIS version's tag (needs cosign + ECR access)
+  repo="${image%@*}"; repo="${repo%:*}"   # strip @digest, then :tag (works with or without a tag)
+  if command -v cosign >/dev/null; then
+    if [ -z "${ECR_LOGIN_DONE:-}" ]; then
+      aws ecr get-login-password --region us-east-1 2>/dev/null \
+        | docker login --username AWS --password-stdin "${repo%%/*}" >/dev/null 2>&1
+      ECR_LOGIN_DONE=1
+    fi
+    if cosign verify "${repo}@${digest}" \
+         --certificate-identity "${SIGNER}${want_ver}" \
+         --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1; then
+      pass "$ns: signature valid, signed by release.yaml@v${want_ver}"
+    else
+      fail "$ns: cosign verify failed for v${want_ver} (signature, identity, or ECR login)"
+    fi
+  else
+    warn "$ns: cosign not installed, signature not checked"
+  fi
+
+  if pf "$ns" web "$port" 80; then
+    root=$(curl -s "http://localhost:$port/")
+    got_env=$(jq -r '.environment // empty' <<< "$root" 2>/dev/null)
+    got_ver=$(jq -r '.version // empty' <<< "$root" 2>/dev/null)
+    [ "$got_ver" = "$want_ver" ] && [ "$got_env" = "$env" ] \
+      && pass "$ns: GET / → version=$got_ver environment=$got_env" \
+      || fail "$ns: GET / → '${root:-no response}' (want version=$want_ver environment=$env)"
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/healthz")
+    [ "$code" = "200" ] && pass "$ns: /healthz → 200" || fail "$ns: /healthz → $code"
+    metrics=$(curl -s "http://localhost:$port/metrics")
+    grep -q "^web_build_info{.*version=\"$want_ver\"" <<< "$metrics" \
+      && pass "$ns: /metrics exposes web_build_info version=$want_ver" \
+      || fail "$ns: web_build_info missing or wrong version in /metrics"
+  else
+    fail "$ns: could not port-forward to svc/web"
   fi
   port=$((port + 1))
 done
@@ -199,7 +248,7 @@ unset gpass
 # ---------------------------------------------------------------- error logs
 section "Errors in platform logs (last 10 min, informational)"
 found_errors=0
-for ns in argocd kyverno falco monitoring; do
+for ns in argocd kyverno falco monitoring web-dev web-prod; do
   for p in $(kubectl get pods -n "$ns" --field-selector=status.phase=Running -o name); do
     n=$(kubectl logs -n "$ns" "$p" --all-containers --since=10m 2>/dev/null \
       | grep -ciE 'level=(error|fatal|panic)|"level": ?"(error|fatal|panic)"|^E[0-9]{4} ' || true)
