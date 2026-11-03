@@ -20,3 +20,8 @@ resources:
 
 service:
   port: 80
+
+# Prometheus Operator scrape config (needs the monitoring.coreos.com CRDs in the cluster)
+serviceMonitor:
+  enabled: true
+  interval: 30s

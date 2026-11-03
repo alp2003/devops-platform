@@ -26,3 +26,5 @@ spec:
       kind: ServiceAccount
     - group: ""
       kind: ConfigMap
+    - group: monitoring.coreos.com   # the app's scrape config, nothing else from that API
+      kind: ServiceMonitor
