@@ -1,16 +1,22 @@
 replicaCount: 3
 
 image:
-  repository: nginxinc/nginx-unprivileged
-  tag: "1.28-alpine"
+  repository: 351323458847.dkr.ecr.us-east-1.amazonaws.com/devops-platform/web
+  # Human-readable label only. When digest is set, the digest is what gets pulled.
+  tag: "0.1.0"
+  # Environments pin an immutable digest (sha256:...). Set by the release bot for dev.
+  digest: ""
+
+# Shown by /version. Empty = derived from the namespace (web-dev -> dev, web-prod -> prod).
+appEnv: ""
 
 resources:
   requests:
     cpu: 50m
-    memory: 32Mi
+    memory: 64Mi
   limits:
     cpu: 200m
-    memory: 64Mi
+    memory: 128Mi
 
 service:
   port: 80
