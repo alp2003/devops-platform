@@ -14,6 +14,8 @@ terraform apply eks.tfplan
 
 echo "== 2/4 kubeconfig"
 aws eks update-kubeconfig --region us-east-1 --name platform --profile study
+# Pin the API hostname to a reachable IP, only if one endpoint IP is dead (see the script)
+"$ROOT/scripts/eks-endpoint-pin.sh" pin platform
 
 echo "== 3/4 ArgoCD"
 cd "$ROOT"

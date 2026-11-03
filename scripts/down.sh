@@ -14,5 +14,6 @@ terraform destroy
 rm -f eks.tfplan
 
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+"$ROOT/scripts/eks-endpoint-pin.sh" unpin platform
 kubectl config delete-context "arn:aws:eks:us-east-1:${ACCOUNT_ID}:cluster/platform" 2>/dev/null || true
 echo "Destroyed. Run the cleanup checks to confirm nothing billable is left."
