@@ -141,3 +141,68 @@ jobs:
             echo "| Digest | \`${DIGEST}\` |"
             echo "| Signed by | \`${GITHUB_REPOSITORY}/.github/workflows/release.yaml@${GITHUB_REF}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  bump-dev:
+    name: Open dev deploy PR
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions: {} # GITHUB_TOKEN gets nothing: everything below uses the App's short-lived token
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          # Narrower than the App itself: this repo only, only what this job needs
+          repositories: devops-platform
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+          persist-credentials: true # needed to push the branch; the token expires and is revoked after the job
+
+      - name: bump dev to the released version
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          DIGEST: ${{ needs.release.outputs.digest }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          # Never trust inputs blindly, even our own job outputs
+          [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::bad version: ${VERSION}"; exit 1; }
+          [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::bad digest: ${DIGEST}"; exit 1; }
+
+          branch="deploy/dev-${VERSION}"
+          git switch -c "${branch}"
+          # strenv() reads the values from the environment: no string interpolation into the yq program
+          yq -i '.image.tag = strenv(VERSION) | .image.digest = strenv(DIGEST)' deploy/envs/dev/values.yaml
+          git diff
+
+          bot_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          git commit -am "deploy(dev): web ${VERSION}"
+          git push origin "${branch}"
+
+          gh pr create --base main --head "${branch}" \
+            --title "deploy(dev): web ${VERSION}" \
+            --body-file - <<EOF
+          Automated by the release workflow.
+
+          | | |
+          |---|---|
+          | Version | \`${VERSION}\` |
+          | Digest | \`${DIGEST}\` |
+          | Release run | ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} |
+
+          Verify the signature before merging:
+          \`\`\`
+          cosign verify ${ECR_REPOSITORY}@${DIGEST} \\
+            --certificate-identity https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yaml@refs/tags/v${VERSION} \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+          EOF
