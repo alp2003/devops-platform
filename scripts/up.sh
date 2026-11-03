@@ -25,6 +25,16 @@ kubectl get secret grafana-admin -n monitoring >/dev/null 2>&1 || \
   kubectl create secret generic grafana-admin -n monitoring \
     --from-literal=admin-user=admin \
     --from-literal=admin-password="$(openssl rand -base64 24)"
+# Alertmanager mounts this secret (platform/apps/monitoring.yaml). Without it the pod can't start.
+# The token is typed in (not echoed), never written to disk or Git.
+if ! kubectl get secret alertmanager-telegram -n monitoring >/dev/null 2>&1; then
+  read -rsp "Telegram bot token (from @BotFather): " tg_token; echo
+  [ -n "$tg_token" ] || { echo "Empty token. Aborted."; exit 1; }
+  kubectl create secret generic alertmanager-telegram -n monitoring \
+    --from-literal=bot-token="$tg_token" >/dev/null
+  unset tg_token
+  echo "secret monitoring/alertmanager-telegram created"
+fi
 echo "== 4/4 Root application"
 kubectl apply -f platform/root.yaml
 
