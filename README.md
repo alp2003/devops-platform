@@ -7,7 +7,7 @@ Everything is code: Terraform builds the infrastructure, ArgoCD deploys the plat
 ## Highlights
 
 | Claim | Proof |
-|---|---|
+| --- | --- |
 | **Unsigned images cannot run** | A/B test on the live cluster: the same pod spec in the same namespace was **denied** with an unsigned image from our own ECR repository and **admitted** with the release-signed one. `verify.sh` also fails if any app pod is older than the signature webhook. |
 | **Prod runs the exact bytes dev tested** | Promotion copies dev's image **digest** into prod by pull request. Nothing is rebuilt. |
 | **Rollback in under a minute** | Drill: promotion live in **80 s**, rollback by reverting the PR in **49 s**, zero downtime both ways, visible in Grafana. |
@@ -52,7 +52,7 @@ flowchart LR
 From a commit to a running pod, each step has one control and blocks one class of problem:
 
 | Stage | Control | What it stops |
-|---|---|---|
+| --- | --- | --- |
 | Source | Ruleset on `main`: PR + 4 required checks, branch up to date | unreviewed or untested code reaching `main` |
 | Source | Actions pinned by SHA, Dependabot, gitleaks on full history | supply-chain drift in CI, leaked secrets |
 | Release | Tag creation admin-only, tags immutable (separate rulesets, negative-tested) | rewriting what a released version means |
@@ -71,7 +71,7 @@ From a commit to a running pod, each step has one control and blocks one class o
 ArgoCD's app-of-apps creates the platform in waves. Each wave starts only when every app in the previous one is **Healthy**, which requires a custom health check for `Application` objects (removed from ArgoCD's defaults in 1.8) and one for Kyverno's `ImageValidatingPolicy`. Both are in `platform/bootstrap/argocd-values.yaml`.
 
 | Wave | Apps | Why here |
-|---|---|---|
+| --- | --- | --- |
 | -2 | `project-platform`, `project-web` | AppProjects before any app that uses them |
 | -1 | `prometheus-crds`, `external-secrets` | CRDs and the secrets operator first |
 | 0 | `kyverno`, `monitoring`, `secrets`, `falco`, `loki`, `alloy` | operators find their CRDs; Grafana and Alertmanager find their Secrets |
@@ -83,7 +83,7 @@ ArgoCD's app-of-apps creates the platform in waves. Each wave starts only when e
 These came from running the platform for real, not from reading docs. Each one ended with a fix and an automated check.
 
 | Symptom | Root cause | Fix |
-|---|---|---|
+| --- | --- | --- |
 | Half of all `kubectl` calls took 16 s | One of the two EKS API endpoint IPs was unreachable from the admin's network; clients waited for a timeout, then fell back. Proven per IP with `curl --resolve` after ruling out the token, DNS and API discovery. | `scripts/eks-endpoint-pin.sh` tests every endpoint IP and pins a reachable one in `/etc/hosts` **only if** one is dead; `verify.sh` checks every IP. |
 | `monitoring` stuck in `Progressing` for 80 min | The Prometheus Operator started 1 s before its CRD existed, disabled that controller and never retried. ArgoCD sync waves were not waiting for health at all. | CRDs in their own app (wave -1), `crds.enabled: false` in kube-prometheus-stack, and an `Application` health check so waves really wait. Proven: CRD → operator 5 m 41 s apart on the next run. |
 | First app pods started before the signature policy | Same root cause: waves did not wait. | Web apps moved to wave 2 behind an `ImageValidatingPolicy` health check; `verify.sh` fails if any app pod predates the webhook. |
@@ -93,7 +93,7 @@ These came from running the platform for real, not from reading docs. Each one e
 ## Design decisions
 
 | Decision | Trade-off |
-|---|---|
+| --- | --- |
 | **SSM Parameter Store** instead of Secrets Manager | Free (standard tier, AWS-managed key) and enough here; Secrets Manager adds automatic rotation and cross-account sharing for $0.40 per secret per month. Switching is one line in the store. |
 | **Pod Identity** instead of IRSA | No OIDC provider per cluster; trust policies restricted by `aws:SourceAccount` and `aws:SourceArn` to this cluster. |
 | Kyverno **Deny** for signatures, **Audit** for the other policies | Signature enforcement is the line that matters; the others warn and report until all workloads comply, then can move to Enforce. |
@@ -115,7 +115,7 @@ This is a lab built to learn and to demonstrate, so some choices favor cost and 
 
 ## Repository layout
 
-```
+```text
 app/                Python service (stdlib HTTP + Prometheus metrics), tests, hardened Dockerfile
 charts/web/         Helm chart: image by digest, probes, ServiceMonitor
 deploy/envs/        dev and prod values (changed only by bot and promotion PRs)
@@ -134,7 +134,7 @@ scripts/            up, down, verify, secrets-init, endpoint pin, cost check
 ## Operating it
 
 | Step | Command | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Secrets (once) | `./scripts/secrets-init.sh` | stores the Telegram bot token (validated) and a random Grafana password in SSM Parameter Store. They persist across clusters; External Secrets syncs them in. `--rotate-grafana` / `--rotate-telegram` to replace. |
 | Bring up | `./scripts/up.sh` | ~20 min. Checks the SSM secrets exist first, then asks nothing. Pins the API endpoint only if one of its IPs is unreachable. |
 | Wait | `watch -n 10 'kubectl get applications -n argocd'` | until all 13 apps are **Synced / Healthy**; they appear wave by wave |
