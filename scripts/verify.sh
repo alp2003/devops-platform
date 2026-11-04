@@ -287,6 +287,18 @@ else
   fail "could not reach Loki"
 fi
 
+# ---------------------------------------------------------------- external secrets
+section "External Secrets"
+store=$(kubectl get clustersecretstore aws-parameter-store -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+[ "$store" = "True" ] && pass "ClusterSecretStore aws-parameter-store Ready (Pod Identity → SSM)" \
+  || fail "ClusterSecretStore aws-parameter-store not Ready: $(kubectl get clustersecretstore aws-parameter-store -o jsonpath='{.status.conditions[0].message}' 2>/dev/null)"
+es_json=$(kubectl get externalsecret -A -o json 2>/dev/null || echo '{"items":[]}')
+n_es=$(jq '.items | length' <<< "$es_json")
+not_synced=$(jq -r '.items[] | select(([.status.conditions[]? | select(.type=="Ready" and .status=="True")] | length) == 0)
+  | "\(.metadata.namespace)/\(.metadata.name): \([.status.conditions[]?.message] | join("; "))"' <<< "$es_json")
+[ "$n_es" -gt 0 ] && [ -z "$not_synced" ] && pass "$n_es/$n_es ExternalSecrets synced from Parameter Store" \
+  || { fail "ExternalSecrets not synced (${n_es} found):"; indent <<< "${not_synced:-none}"; }
+
 # ---------------------------------------------------------------- grafana
 section "Grafana"
 gpass=$(kubectl get secret grafana-admin -n monitoring -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d)
