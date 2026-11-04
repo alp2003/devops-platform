@@ -18,6 +18,8 @@ spec:
     helm:
       releaseName: kps
       valuesObject:
+        crds:
+          enabled: false # installed one wave earlier by the prometheus-crds app
         grafana:
           admin:
             existingSecret: grafana-admin

@@ -4,7 +4,7 @@ metadata:
   name: web
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-1"   # create the project before the apps that use it
+    argocd.argoproj.io/sync-wave: "-2" # projects before any app that uses them
 spec:
   description: Web application (dev + prod)
   sourceRepos:

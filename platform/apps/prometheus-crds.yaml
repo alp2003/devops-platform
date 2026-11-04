@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus-crds
+  namespace: argocd
+  annotations:
+    # The Prometheus Operator checks once, at startup, which CRDs exist and disables the
+    # controllers for any that are missing. Installing the CRDs a full wave earlier
+    # (waves wait for health, see platform/bootstrap/argocd-values.yaml) removes the race.
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: prometheus-operator-crds
+    targetRevision: 32.0.2 # appVersion v0.94.2 = the operator in kube-prometheus-stack 92.17.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring # CRDs are cluster-scoped; this is only a default
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - ServerSideApply=true # the CRDs are too large for client-side apply annotations
