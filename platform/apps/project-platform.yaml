@@ -13,10 +13,12 @@ spec:
     - https://falcosecurity.github.io/charts
     - https://prometheus-community.github.io/helm-charts
     - https://grafana.github.io/helm-charts
+    - https://charts.external-secrets.io
   destinations:
     - { server: https://kubernetes.default.svc, namespace: kyverno }
     - { server: https://kubernetes.default.svc, namespace: falco }
     - { server: https://kubernetes.default.svc, namespace: monitoring }
+    - { server: https://kubernetes.default.svc, namespace: external-secrets }
     # kube-prometheus-stack creates Services in kube-system to scrape CoreDNS and the kubelet
     - { server: https://kubernetes.default.svc, namespace: kube-system }
   clusterResourceWhitelist:

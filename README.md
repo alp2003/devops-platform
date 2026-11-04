@@ -7,7 +7,8 @@ A hardened EKS platform with a signed, versioned release pipeline.
 
 | Step | Command | Notes |
 |---|---|---|
-| Bring up | `./scripts/up.sh` | ~20 min. Prompts for the Telegram bot token (validated with Telegram). Pins the API endpoint only if one of its IPs is unreachable. |
+| Secrets (once) | `./scripts/secrets-init.sh` | stores the Telegram bot token (validated) and a random Grafana password in SSM Parameter Store. They persist across clusters; External Secrets syncs them in. `--rotate-grafana` / `--rotate-telegram` to replace. |
+| Bring up | `./scripts/up.sh` | ~20 min. Checks the SSM secrets exist first, then asks nothing. Pins the API endpoint only if one of its IPs is unreachable. |
 | Wait | `watch -n 10 'kubectl get applications -n argocd'` | until every app is **Synced / Healthy** |
 | Verify | `./scripts/verify.sh` | **Run it ~5 minutes after everything is Healthy.** Right after install, Helm hook jobs are still finishing and the Prometheus Operator logs webhook `bad certificate` errors until its certificate is patched in (install-time race, it stops on its own). |
 | Promote | `gh workflow run promote.yaml -f version=X.Y.Z` | opens a PR copying dev's exact digest to prod |

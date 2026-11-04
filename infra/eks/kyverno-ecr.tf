@@ -6,29 +6,6 @@ data "aws_ecr_repository" "web" {
   name = "devops-platform/web" # owned by infra/registry (persistent stack)
 }
 
-data "aws_iam_policy_document" "kyverno_trust" {
-  statement {
-    actions = ["sts:AssumeRole", "sts:TagSession"]
-    principals {
-      type        = "Service"
-      identifiers = ["pods.eks.amazonaws.com"]
-    }
-    # Only Pod Identity calls from THIS account and THIS cluster
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [data.aws_caller_identity.current.account_id]
-    }
-    condition {
-      test     = "ArnEquals"
-      variable = "aws:SourceArn"
-      values   = [module.eks.cluster_arn]
-    }
-  }
-}
-
-data "aws_caller_identity" "current" {}
-
 data "aws_iam_policy_document" "kyverno_ecr_read" {
   statement {
     sid       = "EcrLogin"
@@ -50,7 +27,7 @@ data "aws_iam_policy_document" "kyverno_ecr_read" {
 
 resource "aws_iam_role" "kyverno" {
   name               = "${var.cluster_name}-kyverno-ecr-read"
-  assume_role_policy = data.aws_iam_policy_document.kyverno_trust.json
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
 }
 
 resource "aws_iam_role_policy" "kyverno_ecr_read" {
