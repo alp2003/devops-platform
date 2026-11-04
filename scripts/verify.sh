@@ -335,10 +335,16 @@ section "Errors in platform logs (last 10 min, informational)"
 # One API call lists the pods, then 8 log reads run in parallel, each with a timeout.
 # Sequentially this took ~11 min on EKS (one slow round trip per pod).
 scan_pod_errors() { # namespace pod
-  local n
-  n=$(kubectl logs -n "$1" "$2" --all-containers --since=10m --request-timeout=20s 2>/dev/null \
-    | grep -ciE 'level=(error|fatal|panic)|"level": ?"(error|fatal|panic)"|^E[0-9]{4} ' || true)
-  [ "${n:-0}" -gt 0 ] && echo "  · $1/$2: $n error lines"
+  local lines n top
+  lines=$(kubectl logs -n "$1" "$2" --all-containers --since=10m --request-timeout=20s 2>/dev/null \
+    | grep -iE 'level=(error|fatal|panic)|"level": ?"(error|fatal|panic)"|^E[0-9]{4} ' || true)
+  [ -n "$lines" ] || return 0
+  n=$(grep -c . <<< "$lines")
+  # Most common message, with IPs/ports/numbers removed so repeats group together:
+  # "236 error lines" is one problem repeated, not 236 problems.
+  top=$(sed -E 's/.*(msg|err)=//; s/[0-9]+(\.[0-9]+){1,}(:[0-9]+)?//g' <<< "$lines" | cut -c1-90 \
+    | sort | uniq -c | sort -rn | head -1 | sed -E 's/^ *([0-9]+) /\1× /')
+  echo "  · $1/$2: $n error lines (most common: $top)"
   return 0
 }
 export -f scan_pod_errors

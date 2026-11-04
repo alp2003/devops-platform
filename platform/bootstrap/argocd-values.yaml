@@ -24,3 +24,25 @@ configs:
         end
       end
       return hs
+    # Kyverno's ImageValidatingPolicy has no built-in health in ArgoCD, so it counted as
+    # Healthy the moment it EXISTED, before Kyverno had registered its webhook. Healthy now
+    # means Kyverno reports it ready, so the web apps (next wave) start only after
+    # signature enforcement is really active.
+    resource.customizations.health.policies.kyverno.io_ImageValidatingPolicy: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = "Waiting for Kyverno to report the policy ready"
+      if obj.status ~= nil and obj.status.conditionStatus ~= nil then
+        local cs = obj.status.conditionStatus
+        if cs.ready == true then
+          hs.status = "Healthy"
+          hs.message = "Ready"
+        elseif cs.conditions ~= nil then
+          for _, c in ipairs(cs.conditions) do
+            if c.status == "False" then
+              hs.message = (c.type or "condition") .. ": " .. (c.message or "not ready")
+            end
+          end
+        end
+      end
+      return hs
