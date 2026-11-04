@@ -4,7 +4,7 @@ metadata:
   name: policies
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"   # after Kyverno's CRDs exist
+    argocd.argoproj.io/sync-wave: "1" # after Kyverno (wave 0) is Healthy
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

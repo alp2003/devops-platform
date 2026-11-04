@@ -4,7 +4,7 @@ metadata:
   name: platform
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "-2" # projects before any app that uses them
 spec:
   description: Cluster-level platform tools (platform team only)
   sourceRepos:

@@ -212,6 +212,9 @@ fi
 
 # ---------------------------------------------------------------- prometheus
 section "Prometheus"
+recon=$(kubectl get prometheus -n monitoring -o jsonpath='{.items[0].status.conditions[?(@.type=="Reconciled")].status}' 2>/dev/null)
+[ "$recon" = "True" ] && pass "Prometheus resource reconciled by the operator" \
+  || fail "Prometheus resource not reconciled (operator started before its CRDs? check its log for 'not installed')"
 if pf monitoring kps-kube-prometheus-stack-prometheus 19090 9090; then
   down=$(curl -s 'http://localhost:19090/api/v1/query?query=up==0' | jq -r '.data.result[] | "\(.metric.job) \(.metric.instance)"')
   up=$(curl -s 'http://localhost:19090/api/v1/query?query=count(up==1)' | jq -r '.data.result[0].value[1] // 0')
