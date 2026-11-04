@@ -185,6 +185,20 @@ warnings=$(kubectl run verify-kyverno -n web-dev --image=busybox:latest --dry-ru
 ivp=$(kubectl get imagevalidatingpolicy require-release-signature -o name 2>/dev/null)
 [ -n "$ivp" ] && pass "signature policy installed: require-release-signature (Deny)" || fail "ImageValidatingPolicy require-release-signature not found"
 
+# Order matters: a pod admitted before the signature webhook existed was never checked.
+# Every running web pod must be newer than the moment Kyverno registered the webhook.
+ready_at=$(kubectl get imagevalidatingpolicy require-release-signature \
+  -o jsonpath='{.status.conditionStatus.conditions[?(@.type=="WebhookConfigured")].lastTransitionTime}' 2>/dev/null)
+if [ -n "$ready_at" ]; then
+  older=$(kubectl get pods -A -l app=web -o json 2>/dev/null \
+    | jq -r --arg t "$ready_at" '.items[] | select(.metadata.namespace | test("^web-")) | select(.metadata.creationTimestamp < $t)
+        | "\(.metadata.namespace)/\(.metadata.name) created \(.metadata.creationTimestamp)"')
+  [ -z "$older" ] && pass "every web pod was admitted after the signature webhook was active ($ready_at)" \
+    || { fail "web pods older than the signature webhook ($ready_at), never signature-checked:"; indent <<< "$older"; }
+else
+  fail "signature policy has no WebhookConfigured time (not ready?)"
+fi
+
 reports=$(kubectl get policyreport -A --no-headers 2>/dev/null | wc -l)
 [ "$reports" -gt 0 ] && pass "$reports PolicyReports generated" || fail "no PolicyReports found"
 
