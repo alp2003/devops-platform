@@ -64,6 +64,7 @@ From a commit to a running pod, each step has one control and blocks one class o
 | Deploy | Bot PRs for dev, promotion PRs for prod, both through CI and review | untracked changes to what runs where |
 | Admission | Kyverno `ImageValidatingPolicy`: identity must be `release.yaml@refs/tags/vX.Y.Z`, fail-closed | images pushed by hand, even to our own ECR |
 | Admission | Pod Security `restricted` + Kyverno policies (registry allow-list, no `:latest`, read-only rootfs) | insecure pod specs |
+| Network | Default-deny NetworkPolicies in both app namespaces, enforced by the VPC CNI agent: only Prometheus may connect in (port 8080), the app may only reach DNS. `verify.sh` proves enforcement against control tests where the same connection succeeds without a policy | lateral movement inside the cluster, a compromised app downloading tools or sending data out |
 | Runtime | Falco (modern eBPF) | shells and suspicious activity inside containers |
 | Secrets | External Secrets + SSM, Pod Identity, `/devops-platform/*` read-only, store limited to `monitoring` | static keys, secrets in Git or in Terraform state |
 
