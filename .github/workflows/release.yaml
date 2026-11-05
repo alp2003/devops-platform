@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TRIVY_VERSION: "0.76.1"
+  TRIVY_VERSION: "0.76.2"
   COSIGN_VERSION: "v3.1.4"
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
 
