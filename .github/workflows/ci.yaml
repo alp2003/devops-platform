@@ -127,6 +127,10 @@ jobs:
           grep -q 'web_build_info{' <<< "${metrics}"
           docker run --rm --entrypoint python web:ci -c "import importlib.util, sys; sys.exit(any(importlib.util.find_spec(m) for m in ('pip', 'ensurepip')))"
           echo "no pip/ensurepip in runtime image"
+          if docker run --rm --entrypoint sh web:ci -c 'command -v apt || command -v apt-get || dpkg-query -W -f "\${Status}" apt 2>/dev/null | grep -q "ok installed"'; then
+            echo "::error::apt is present in the runtime image"; exit 1
+          fi
+          echo "no apt in runtime image"
           start=$(date +%s); docker stop web; took=$(( $(date +%s) - start ))
           echo "graceful stop took ${took}s"
           test "${took}" -lt 5
