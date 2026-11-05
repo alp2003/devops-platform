@@ -142,8 +142,8 @@ scripts/            up, down, verify, secrets-init, endpoint pin, cost check
 | Step | Command | Notes |
 | --- | --- | --- |
 | Secrets (once) | `./scripts/secrets-init.sh` | stores the Telegram bot token (validated) and a random Grafana password in SSM Parameter Store. They persist across clusters; External Secrets syncs them in. `--rotate-grafana` / `--rotate-telegram` to replace. |
-| Bring up | `./scripts/up.sh` | ~20 min. Checks the SSM secrets exist first, then asks nothing. Pins the API endpoint only if one of its IPs is unreachable. |
-| Wait | `watch -n 10 'kubectl get applications -n argocd'` | until all 13 apps are **Synced / Healthy**; they appear wave by wave |
+| Bring up | `./scripts/up.sh` | ~20 min. Checks the SSM secrets and your public IP first, then asks only to confirm the Terraform plan. Pins the API endpoint only if one of its IPs is unreachable. |
+| Wait | (done by `up.sh`) | `up.sh` waits until all 13 apps are **Synced / Healthy** and prints how long each phase took; `watch -n 10 'kubectl get applications -n argocd'` shows the waves live |
 | Verify | `./scripts/verify.sh` | **Run it ~5 minutes after everything is Healthy.** Right after install, Helm hook jobs are still finishing and the Prometheus Operator logs webhook `bad certificate` errors until its certificate is patched in (install-time, stops on its own). |
 | Release | `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z` | admin only; opens the dev deploy PR automatically |
 | Promote | `gh workflow run promote.yaml -f version=X.Y.Z` | refuses if dev does not run that version; opens a PR copying dev's exact digest to prod |
