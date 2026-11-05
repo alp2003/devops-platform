@@ -1,5 +1,5 @@
 # Environment: dev. CI updates image.tag automatically (Phase 4).
 replicaCount: 1
 image:
-  tag: "0.1.1"
-  digest: sha256:22b6c418c17b48523b85a4acca555855f06aa3beb95ed2c7ad9a757b611df03e
+  tag: "0.1.2"
+  digest: sha256:5328d76d86a9bda48775c539c31cac9aeedd940747c151fb7f7221269dbdec8a
