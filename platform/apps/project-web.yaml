@@ -28,3 +28,5 @@ spec:
       kind: ConfigMap
     - group: monitoring.coreos.com   # the app's scrape config, nothing else from that API
       kind: ServiceMonitor
+    - group: networking.k8s.io       # the app's own default-deny and allow rules
+      kind: NetworkPolicy
