@@ -1,0 +1,174 @@
+name: terraform
+
+# plan  : every PR that touches infra/ (all stacks), result in the run summary
+# apply : persistent stacks (bootstrap, registry) after merge to main, with approval
+# drift : nightly plan of the persistent stacks; any difference fails the run
+# infra/eks is created and destroyed per session by scripts/up.sh and down.sh,
+# so it is planned on PRs but never applied here.
+on:
+  pull_request:
+    paths: ["infra/**", ".github/workflows/terraform.yaml"]
+  push:
+    branches: [main]
+    paths: ["infra/bootstrap/**", "infra/registry/**"]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: "1.17.1"
+  AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "1"
+  TF_VAR_alert_email: ${{ secrets.TF_VAR_ALERT_EMAIL }}
+
+jobs:
+  plan:
+    name: Plan (${{ matrix.stack }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, registry, eks]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_TF_PLAN_ROLE_ARN }}
+          role-session-name: tf-plan-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: terraform plan
+        env:
+          STACK: ${{ matrix.stack }}
+        run: |
+          set -uo pipefail
+          tf() {
+            docker run --rm -v "$PWD:/src" -w "/src/infra/${STACK}" \
+              -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN -e AWS_REGION \
+              -e TF_IN_AUTOMATION -e TF_VAR_alert_email \
+              "hashicorp/terraform:${TERRAFORM_VERSION}" "$@"
+          }
+          extra=()
+          # the EKS API allow-list is the admin's IP at up.sh time; any valid /32 plans the same
+          [ "${STACK}" = "eks" ] && extra=(-var "admin_cidr=203.0.113.10/32")
+          tf init -input=false -no-color > init.txt 2>&1 || { cat init.txt; exit 1; }
+          # -lock=false: the plan role is read-only and must not write the state lock.
+          # Actions runs scripts with "bash -e": exit code 2 ("changes") is a result, not a
+          # failure, so -e is switched off around the plan and the code handled explicitly.
+          set +e
+          tf plan -input=false -lock=false -no-color -detailed-exitcode "${extra[@]}" > plan.txt 2>&1
+          rc=$?
+          set -e
+          case $rc in 0) result="no changes" ;; 2) result="changes" ;; *) result="ERROR" ;; esac
+          {
+            echo "### \`infra/${STACK}\`: ${result}"
+            grep -E '^Plan:|^No changes' plan.txt || true
+            echo "<details><summary>full plan</summary>"
+            echo
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -eq 1 ]; then tail -40 plan.txt; exit 1; fi
+          grep -E '^Plan:|^No changes' plan.txt || true
+
+  apply:
+    name: Apply persistent stacks
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    environment: infra # main only + manual approval; the apply role trusts only this
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_TF_APPLY_ROLE_ARN }}
+          role-session-name: tf-apply-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: plan and apply
+        run: |
+          set -uo pipefail
+          for STACK in bootstrap registry; do
+            tf() {
+              docker run --rm -v "$PWD:/src" -w "/src/infra/${STACK}" \
+                -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN -e AWS_REGION \
+                -e TF_IN_AUTOMATION -e TF_VAR_alert_email \
+                "hashicorp/terraform:${TERRAFORM_VERSION}" "$@"
+            }
+            echo "::group::infra/${STACK}"
+            tf init -input=false -no-color || exit 1
+            set +e
+            tf plan -input=false -no-color -detailed-exitcode -out=tfplan
+            rc=$?
+            set -e
+            if [ "$rc" -eq 2 ]; then
+              tf apply -input=false -no-color tfplan || exit 1
+              echo "### \`infra/${STACK}\`: applied" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$rc" -eq 0 ]; then
+              echo "### \`infra/${STACK}\`: no changes" >> "$GITHUB_STEP_SUMMARY"
+            else
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+
+  drift:
+    name: Drift check (${{ matrix.stack }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [bootstrap, registry]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_TF_PLAN_ROLE_ARN }}
+          role-session-name: tf-drift-${{ github.run_id }}
+          aws-region: us-east-1
+      - name: compare AWS with main
+        env:
+          STACK: ${{ matrix.stack }}
+        run: |
+          set -uo pipefail
+          tf() {
+            docker run --rm -v "$PWD:/src" -w "/src/infra/${STACK}" \
+              -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN -e AWS_REGION \
+              -e TF_IN_AUTOMATION -e TF_VAR_alert_email \
+              "hashicorp/terraform:${TERRAFORM_VERSION}" "$@"
+          }
+          tf init -input=false -no-color > init.txt 2>&1 || { cat init.txt; exit 1; }
+          set +e
+          tf plan -input=false -lock=false -no-color -detailed-exitcode > plan.txt 2>&1
+          rc=$?
+          set -e
+          cat plan.txt
+          case $rc in
+            0) echo "### \`infra/${STACK}\`: in sync with main" >> "$GITHUB_STEP_SUMMARY" ;;
+            2) echo "::error::infra/${STACK} has drifted: AWS differs from main (someone changed it outside Terraform)"
+               echo "### \`infra/${STACK}\`: DRIFT" >> "$GITHUB_STEP_SUMMARY"; exit 1 ;;
+            *) exit 1 ;;
+          esac
