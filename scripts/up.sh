@@ -55,14 +55,25 @@ kubectl apply -f platform/root.yaml
 "$ROOT/scripts/eks-endpoint-pin.sh" pin platform
 
 echo "== 5/5 Waiting for every app to be Healthy (sync waves -2 .. 2)"
-# root is Healthy only when all its child apps are (Application health check in argocd-values.yaml)
-if kubectl wait application/root -n argocd --for=jsonpath='{.status.health.status}'=Healthy --timeout=30m; then
-  phase_done "Platform apps (all waves)"
-else
-  echo "Not all apps became Healthy within 30 minutes. Still waiting:"
-  kubectl get applications -n argocd | grep -vE 'Synced +Healthy' || true
-  exit 1
-fi
+# root's health alone is not enough: at the start only wave -2 exists and already counts
+# as Healthy. Done means: root's sync operation has finished (all waves applied) AND
+# every app defined in platform/apps (plus root) is Synced and Healthy.
+expected=$(( $(grep -lx 'kind: Application' platform/apps/*.yaml | wc -l) + 1 ))
+deadline=$(( SECONDS + 1800 ))
+while :; do
+  phase=$(kubectl get application root -n argocd -o jsonpath='{.status.operationState.phase}' 2>/dev/null || true)
+  ready=$(kubectl get applications -n argocd -o json 2>/dev/null \
+    | jq '[.items[] | select(.status.sync.status=="Synced" and .status.health.status=="Healthy")] | length')
+  printf '\r  root sync: %-10s apps Synced/Healthy: %s/%s ' "${phase:-pending}" "${ready:-0}" "$expected"
+  if [ "$phase" = "Succeeded" ] && [ "${ready:-0}" -ge "$expected" ]; then echo; break; fi
+  if [ "$SECONDS" -ge "$deadline" ]; then
+    echo; echo "Not all apps became Healthy within 30 minutes. Still waiting:"
+    kubectl get applications -n argocd | grep -vE 'Synced +Healthy' || true
+    exit 1
+  fi
+  sleep 10
+done
+phase_done "Platform apps (all waves)"
 
 echo
 echo "== Timing"
