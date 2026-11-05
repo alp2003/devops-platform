@@ -51,18 +51,27 @@ resource "aws_iam_role_policy_attachment" "tf_plan_read" {
 }
 
 # ReadOnlyAccess can read secret VALUES. Plans never need them: deny explicitly.
+# SSM is denied only for THIS account's parameters: AWS's public parameters
+# (arn:aws:ssm:<region>::parameter/aws/service/..., e.g. the EKS AMI the node group
+# looks up) have no account ID in their ARN and must stay readable.
+data "aws_caller_identity" "current" {}
+
 data "aws_iam_policy_document" "tf_plan_deny_secrets" {
   statement {
-    sid    = "NoSecretValues"
+    sid    = "NoOwnParameterValues"
     effect = "Deny"
     actions = [
       "ssm:GetParameter",
       "ssm:GetParameters",
       "ssm:GetParametersByPath",
       "ssm:GetParameterHistory",
-      "secretsmanager:GetSecretValue",
-      "kms:Decrypt",
     ]
+    resources = ["arn:aws:ssm:*:${data.aws_caller_identity.current.account_id}:parameter/*"]
+  }
+  statement {
+    sid       = "NoSecretValues"
+    effect    = "Deny"
+    actions   = ["secretsmanager:GetSecretValue", "kms:Decrypt"]
     resources = ["*"]
   }
 }
