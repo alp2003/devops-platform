@@ -57,7 +57,8 @@ From a commit to a running pod, each step has one control and blocks one class o
 | Source | Actions pinned by SHA, Dependabot, gitleaks on full history | supply-chain drift in CI, leaked secrets |
 | Release | Tag creation admin-only, tags immutable (separate rulesets, negative-tested) | rewriting what a released version means |
 | Release | Release must be on `main`; tests and smoke test run on the **production** image | releasing unreviewed or broken builds |
-| Image | Pinned base digest, pip removed, non-root, read-only rootfs, all caps dropped; Trivy gate on fixable HIGH/CRITICAL | known-fixable CVEs, tooling an attacker could use |
+| Image | Pinned base digest, pip and apt removed (CI fails if either returns), non-root, read-only rootfs, all caps dropped; Trivy gate on fixable HIGH/CRITICAL | known-fixable CVEs, tooling an attacker could use |
+| Infrastructure | Terraform plan on every PR with a read-only role that is denied secret values; apply only from `main`, in a GitHub environment that needs a human approval (no admin bypass); nightly drift check | unreviewed infrastructure changes, laptops with admin keys, changes made by hand in the console |
 | Registry | GitHub OIDC → IAM role trusted for `refs/tags/v*` only; ECR tags immutable, scan on push | long-lived AWS keys, overwriting a released tag |
 | Signature | cosign keyless (GitHub OIDC identity, Rekor transparency log), signed **by digest** | anyone else producing a "valid" image |
 | Deploy | Bot PRs for dev, promotion PRs for prod, both through CI and review | untracked changes to what runs where |
@@ -88,6 +89,10 @@ These came from running the platform for real, not from reading docs. Each one e
 | `monitoring` stuck in `Progressing` for 80 min | The Prometheus Operator started 1 s before its CRD existed, disabled that controller and never retried. ArgoCD sync waves were not waiting for health at all. | CRDs in their own app (wave -1), `crds.enabled: false` in kube-prometheus-stack, and an `Application` health check so waves really wait. Proven: CRD → operator 5 m 41 s apart on the next run. |
 | First app pods started before the signature policy | Same root cause: waves did not wait. | Web apps moved to wave 2 behind an `ImageValidatingPolicy` health check; `verify.sh` fails if any app pod predates the webhook. |
 | Alerts silently not delivered, while the test said "delivered" | A doubled paste of the Telegram token; the test checked a counter that only increases after all retries. | Token format + `getMe` validation; the test now reads the per-attempt failure counter and uses a unique alert per run. |
+| Terraform errors were invisible in CI | GitHub runs scripts with `bash -e`, and `terraform plan -detailed-exitcode` returns 2 for "changes": the script died before printing the plan. | `set +e` around each plan, exit code handled explicitly, the last 40 lines printed on a real error. |
+| The EKS plan failed with the read-only role | The deny on secret values covered every SSM parameter, including AWS's public one with the EKS node AMI. | Deny only this account's parameters (`arn:aws:ssm:*:<account>:parameter/*`); AWS public parameters have no account ID. |
+| The apply environment accepted every branch | "Protected branches only" counts classic branch protection, and `main` is protected by a ruleset, so no branch counted as protected: all were allowed. Found in the UI after the API said `protected_branches: true`. | An explicit `main`-only branch policy, and admin bypass switched off. |
+| A new HIGH CVE in `apt` blocked every PR | A fix was published for `apt`, and the pinned Python base image had not been rebuilt yet. | `apt` removed from the runtime image (the app never uses it), with a CI guard proven to catch it in the original image. |
 | `verify.sh` reported "11 minutes" for one section | One `kubectl logs` call per pod, sequentially, over a long network path. | One list call, then parallel reads with a timeout each: ~2 minutes for the whole script. |
 
 ## Design decisions
@@ -111,7 +116,8 @@ This is a lab built to learn and to demonstrate, so some choices favor cost and 
 - Remaining Kyverno policies in Enforce, plus a Falco rule for denied reads.
 - Customer-managed KMS keys for ECR and secrets, ECR lifecycle rules that keep signature artifacts, and VPC endpoints for AWS APIs.
 - Dependency lock files with hashes and a distroless base image.
-- Terraform plan on PR and apply on merge, instead of applying from the admin's machine.
+- GitHub settings (rulesets, the `infra` environment) managed as code with the Terraform GitHub provider; today they are configured by hand and verified with `gh api`.
+- A narrower apply role (permission boundary) instead of `AdministratorAccess`.
 
 ## Repository layout
 
@@ -119,7 +125,7 @@ This is a lab built to learn and to demonstrate, so some choices favor cost and 
 app/                Python service (stdlib HTTP + Prometheus metrics), tests, hardened Dockerfile
 charts/web/         Helm chart: image by digest, probes, ServiceMonitor
 deploy/envs/        dev and prod values (changed only by bot and promotion PRs)
-infra/bootstrap/    budget alarm (persistent)
+infra/bootstrap/    budget alarm, GitHub OIDC roles for Terraform plan and apply (persistent)
 infra/registry/     ECR repository + GitHub OIDC release role (persistent)
 infra/eks/          VPC, EKS, Pod Identity roles for Kyverno and External Secrets (per session)
 platform/root.yaml  ArgoCD app of apps
@@ -128,7 +134,7 @@ platform/policies/  Kyverno policies, including the signature policy
 platform/secrets/   ClusterSecretStore + ExternalSecrets
 platform/dashboards Grafana "Web releases" dashboard
 scripts/            up, down, verify, secrets-init, endpoint pin, cost check
-.github/workflows/  ci, release, promote
+.github/workflows/  ci, release, promote, terraform (plan, apply, drift)
 ```
 
 ## Operating it
@@ -142,6 +148,7 @@ scripts/            up, down, verify, secrets-init, endpoint pin, cost check
 | Release | `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z` | admin only; opens the dev deploy PR automatically |
 | Promote | `gh workflow run promote.yaml -f version=X.Y.Z` | refuses if dev does not run that version; opens a PR copying dev's exact digest to prod |
 | Roll back | `gh pr revert <promotion PR>` | merge it: ArgoCD returns prod to the previous digest |
+| Change infra | PR touching `infra/` | every stack is planned in the PR; after merge, persistent stacks wait for your approval in the `infra` environment, then apply. A nightly drift check fails if AWS differs from `main`. |
 | Tear down | `./scripts/down.sh` then `./scripts/aws-cost-check.sh` | always: the cluster costs money per hour |
 
 ## Stack
