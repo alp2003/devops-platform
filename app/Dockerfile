@@ -26,10 +26,15 @@ LABEL org.opencontainers.image.title="web" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${APP_COMMIT}" \
       org.opencontainers.image.source="https://github.com/alp2003/devops-platform"
-# pip is a build tool: the app doesn't need it at runtime, and it carries its own vendored libraries.
-# Ask Python where ensurepip lives instead of hardcoding the version in the path.
+# pip and apt are install-time tools: the app needs neither at runtime, so every CVE in
+# them (or in the libraries they vendor) is pure risk. pip: ask Python where ensurepip
+# lives instead of hardcoding the version. apt: marked "protected" in Debian, hence the
+# force flags; dpkg itself stays (it is Essential, and owns the package database).
 RUN python -m pip uninstall -y pip \
- && rm -rf "$(python -c 'import ensurepip, os; print(os.path.dirname(ensurepip.__file__))')"
+ && rm -rf "$(python -c 'import ensurepip, os; print(os.path.dirname(ensurepip.__file__))')" \
+ && dpkg --purge --force-remove-essential --force-remove-protected \
+      apt $(dpkg-query -W -f '${Package}\n' 'libapt-pkg*') \
+ && rm -rf /var/lib/apt /var/cache/apt /etc/apt
 COPY --from=build /deps /deps
 COPY main.py /app/main.py
 USER 10001:10001
