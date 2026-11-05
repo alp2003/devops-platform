@@ -174,13 +174,23 @@ for ns in web-dev web-prod; do
   kubectl get networkpolicy default-deny -n "$ns" >/dev/null 2>&1 \
     && pass "$ns: default-deny NetworkPolicy present" || fail "$ns: no default-deny NetworkPolicy"
 done
-# Negative test: a pod in another namespace must NOT reach the app (policy enforced, not just stored)
-if kubectl run "nettest-$$" -n default --image=busybox:1.37 --restart=Never --rm -i --quiet \
-     --pod-running-timeout=60s --command -- wget -T 5 -qO- http://web.web-dev.svc/healthz >/dev/null 2>&1; then
+# Each "blocked" result is only meaningful next to a control: the same test pod, where
+# no policy applies, must SUCCEED. Otherwise a broken test would look like a working policy.
+nettest() { # name, command...: run a throwaway busybox pod in 'default', return its exit code
+  local name=$1; shift
+  kubectl run "$name-$$" -n default --image=busybox:1.37 --restart=Never --rm -i --quiet \
+    --pod-running-timeout=60s --command -- "$@" >/dev/null 2>&1
+}
+if ! nettest ctrl-in wget -T 5 -qO- http://kps-grafana.monitoring.svc/api/health; then
+  fail "control failed: a test pod in 'default' cannot reach Grafana (no policy there), so the ingress test is inconclusive"
+elif nettest nettest-in wget -T 5 -qO- http://web.web-dev.svc/healthz; then
   fail "a pod in 'default' reached web-dev: NetworkPolicies are NOT enforced"
 else
-  pass "a pod in 'default' cannot reach web-dev (ingress denied)"
+  pass "a pod in 'default' cannot reach web-dev (control without a policy: reachable)"
 fi
+nettest ctrl-out nc -z -w 3 1.1.1.1 443 \
+  && pass "control: the cluster itself has internet access (so the egress test below is meaningful)" \
+  || fail "control failed: no internet even without a policy, so the egress test is inconclusive"
 # Egress: the app may resolve names but must not open connections to the internet
 egress_probe='import socket, sys
 socket.getaddrinfo("kubernetes.default.svc.cluster.local", 443)
