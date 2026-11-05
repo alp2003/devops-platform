@@ -23,6 +23,9 @@ module "eks" {
   addons = {
     vpc-cni = {
       before_compute = true
+      # Turn on the VPC CNI network policy agent: without it, NetworkPolicies are
+      # accepted by the API server but silently NOT enforced.
+      configuration_values = jsonencode({ enableNetworkPolicy = "true" })
     }
     eks-pod-identity-agent = {
       before_compute = true

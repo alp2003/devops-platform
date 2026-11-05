@@ -25,3 +25,9 @@ service:
 serviceMonitor:
   enabled: true
   interval: 30s
+
+# Default-deny NetworkPolicies; only Prometheus (from this namespace) may connect,
+# and the app may only reach DNS. Needs an enforcing CNI (VPC CNI with network policy).
+networkPolicy:
+  enabled: true
+  metricsNamespace: monitoring

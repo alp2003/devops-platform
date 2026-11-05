@@ -168,6 +168,33 @@ for env in dev prod; do
   port=$((port + 1))
 done
 
+# ---------------------------------------------------------------- network policies
+section "Network policies"
+for ns in web-dev web-prod; do
+  kubectl get networkpolicy default-deny -n "$ns" >/dev/null 2>&1 \
+    && pass "$ns: default-deny NetworkPolicy present" || fail "$ns: no default-deny NetworkPolicy"
+done
+# Negative test: a pod in another namespace must NOT reach the app (policy enforced, not just stored)
+if kubectl run "nettest-$$" -n default --image=busybox:1.37 --restart=Never --rm -i --quiet \
+     --pod-running-timeout=60s --command -- wget -T 5 -qO- http://web.web-dev.svc/healthz >/dev/null 2>&1; then
+  fail "a pod in 'default' reached web-dev: NetworkPolicies are NOT enforced"
+else
+  pass "a pod in 'default' cannot reach web-dev (ingress denied)"
+fi
+# Egress: the app may resolve names but must not open connections to the internet
+egress_probe='import socket, sys
+socket.getaddrinfo("kubernetes.default.svc.cluster.local", 443)
+try:
+    socket.create_connection(("1.1.1.1", 443), 3); sys.exit(2)
+except OSError:
+    sys.exit(0)'
+kubectl exec -n web-dev deploy/web -- python -c "$egress_probe" >/dev/null 2>&1; rc=$?
+case $rc in
+  0) pass "web-dev: DNS works, outbound connection to the internet blocked" ;;
+  2) fail "web-dev: app could open an outbound internet connection (egress not denied)" ;;
+  *) fail "web-dev: DNS lookup failed inside the app pod (egress rule for kube-dns broken?)" ;;
+esac
+
 # ---------------------------------------------------------------- kyverno
 section "Kyverno"
 not_ready_pol=$(kubectl get clusterpolicy -o json 2>/dev/null | jq -r '.items[] | select((.status.conditions // [] | map(select(.type=="Ready" and .status=="True")) | length) == 0) | .metadata.name')
