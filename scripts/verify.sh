@@ -103,6 +103,39 @@ for app in $(echo "$apps" | jq -r '.items[] | select(.status.sync.status != "Syn
   echo "$apps" | jq -r --arg a "$app" '.items[] | select(.metadata.name==$a) | .status.resources[]? | select(.status != "Synced") | "       ↳ \($a): \(.kind)/\(.name) \(.status)"'
 done
 
+# GitHub login (Dex) and RBAC. The login itself needs a browser; these checks prove the
+# pieces it depends on: credentials synced, Dex up, GitHub offered on the login page.
+dex_ready=$(kubectl get deploy -n argocd argocd-dex-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+[ "${dex_ready:-0}" -ge 1 ] && pass "Dex running (GitHub login)" || fail "argocd-dex-server not ready"
+dex_keys=$(kubectl get secret -n argocd argocd-dex-github -o json 2>/dev/null \
+  | jq -r 'select(.metadata.labels["app.kubernetes.io/part-of"] == "argocd") | .data | keys | join(",")')
+[ "$dex_keys" = "clientID,clientSecret" ] && pass "argocd-dex-github Secret synced from SSM (labelled for ArgoCD)" \
+  || fail "argocd-dex-github Secret missing, unlabelled or incomplete (keys: ${dex_keys:-none})"
+if pf argocd argocd-server 18443 443; then
+  connectors=$(curl -sk --max-time 10 https://localhost:18443/api/v1/settings | jq -r '[.dexConfig.connectors[]?.id] | join(",")')
+  [ "$connectors" = "github" ] && pass "login page offers GitHub (settings API: connectors=github)" \
+    || fail "GitHub connector not active (connectors: ${connectors:-none})"
+else
+  fail "cannot port-forward argocd-server"
+fi
+# RBAC decisions from ArgoCD's own policy engine, allowed AND denied cases
+# </dev/null: kubectl exec would otherwise swallow the rest of the heredoc below
+rbac() { kubectl exec -n argocd deploy/argocd-server -- argocd admin settings rbac can "$@" --namespace argocd </dev/null 2>/dev/null | tail -1; }
+rbac_fail=""
+while read -r want subject action resource object; do
+  [ -z "$want" ] && continue
+  got=$(rbac "$subject" "$action" "$resource" "$object")
+  [ "$got" = "$want" ] || rbac_fail+="${subject} ${action} ${resource} ${object}: got '${got:-error}', expected ${want}"$'\n'
+done <<'EOF_RBAC'
+Yes alp2003            sync applications web/web-prod
+Yes role:web-developer sync applications web/web-dev
+No  role:web-developer sync applications web/web-prod
+No  role:web-developer get  applications platform/monitoring
+No  someone-else       get  applications web/web-dev
+EOF_RBAC
+[ -z "$rbac_fail" ] && pass "ArgoCD RBAC: 5/5 allow/deny decisions as expected" \
+  || { fail "ArgoCD RBAC mismatches:"; indent <<< "${rbac_fail%$'\n'}"; }
+
 # ---------------------------------------------------------------- web app
 section "Web app"
 # The chain we prove, per environment:

@@ -19,6 +19,8 @@ spec:
     - { server: https://kubernetes.default.svc, namespace: falco }
     - { server: https://kubernetes.default.svc, namespace: monitoring }
     - { server: https://kubernetes.default.svc, namespace: external-secrets }
+    # only for the ExternalSecret with ArgoCD's GitHub login credentials (platform/secrets)
+    - { server: https://kubernetes.default.svc, namespace: argocd }
     # kube-prometheus-stack creates Services in kube-system to scrape CoreDNS and the kubelet
     - { server: https://kubernetes.default.svc, namespace: kube-system }
   clusterResourceWhitelist:

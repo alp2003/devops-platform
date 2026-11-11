@@ -5,6 +5,7 @@
 #   scripts/secrets-init.sh                  create whatever is missing (idempotent)
 #   scripts/secrets-init.sh --rotate-grafana   new random Grafana admin password
 #   scripts/secrets-init.sh --rotate-telegram  replace the Telegram bot token
+#   scripts/secrets-init.sh --rotate-github    replace the ArgoCD GitHub OAuth App credentials
 #
 # Values never appear in Terraform state, in Git, on screen or in 'ps': they are read
 # silently and passed to the AWS CLI and curl through stdin.
@@ -14,6 +15,8 @@ export AWS_REGION="${AWS_REGION:-us-east-1}"
 
 TELEGRAM=/devops-platform/telegram-bot-token
 GRAFANA=/devops-platform/grafana-admin-password
+GH_ID=/devops-platform/argocd-github-client-id
+GH_SECRET=/devops-platform/argocd-github-client-secret
 ROTATE="${1:-}"
 
 exists() { aws ssm get-parameters --names "$1" --query 'length(Parameters)' --output text | grep -qx 1; }
@@ -60,4 +63,39 @@ if ! exists "$GRAFANA" || [ "$ROTATE" = "--rotate-grafana" ]; then
   echo "✓ $GRAFANA stored (random; read it with: aws ssm get-parameter --name $GRAFANA --with-decryption --query Parameter.Value --output text)"
 else
   echo "· $GRAFANA exists (use --rotate-grafana to replace)"
+fi
+
+# GitHub OAuth App for ArgoCD login (Dex). Validated against GitHub before storing: the
+# "check token" API answers 404 for valid app credentials with an unknown token, 401 for
+# wrong credentials. Credentials go to curl through stdin (-K -), never as arguments.
+ask_github_app() {
+  local id secret code
+  for _ in 1 2 3; do
+    read -rp "GitHub OAuth App Client ID: " id
+    read -rsp "GitHub OAuth App client secret: " secret; echo >&2
+    if [[ ! "$id" =~ ^[A-Za-z0-9.]{16,40}$ ]] || [[ ! "$secret" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "  ✗ unexpected format (Client ID ~20 chars, secret 40 hex chars). Try again." >&2; continue
+    fi
+    code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -X POST \
+      -H 'Accept: application/vnd.github+json' -d '{"access_token":"devops-platform-check"}' \
+      -K - <<< "url = \"https://api.github.com/applications/${id}/token\"
+user = \"${id}:${secret}\"" 2>/dev/null || true)
+    if [ "$code" = 404 ]; then
+      echo "  ✓ GitHub accepted the app credentials" >&2
+      printf '%s\n%s' "$id" "$secret"; return 0
+    fi
+    echo "  ✗ GitHub rejected these credentials (HTTP ${code:-none})" >&2
+  done
+  return 1
+}
+
+if ! exists "$GH_ID" || ! exists "$GH_SECRET" || [ "$ROTATE" = "--rotate-github" ]; then
+  creds=$(ask_github_app) || { echo "No valid GitHub app credentials after 3 attempts. Aborted." >&2; exit 1; }
+  overwrite=false; exists "$GH_ID" && overwrite=true
+  put "$GH_ID" "${creds%%$'\n'*}" "$overwrite"
+  overwrite=false; exists "$GH_SECRET" && overwrite=true
+  put "$GH_SECRET" "${creds#*$'\n'}" "$overwrite"; unset creds
+  echo "✓ $GH_ID and $GH_SECRET stored"
+else
+  echo "· $GH_ID and $GH_SECRET exist (use --rotate-github to replace)"
 fi

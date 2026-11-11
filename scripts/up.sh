@@ -10,6 +10,7 @@ phase_done() { TIMES+=("$(printf '%-28s %3dm%02ds' "$1" $(((SECONDS - TP) / 60))
 # Fail fast, before spending anything: the cluster's secrets must already exist in SSM
 missing=$(aws ssm get-parameters --region us-east-1 \
   --names /devops-platform/telegram-bot-token /devops-platform/grafana-admin-password \
+    /devops-platform/argocd-github-client-id /devops-platform/argocd-github-client-secret \
   --query 'InvalidParameters' --output text)
 if [ -n "$missing" ] && [ "$missing" != "None" ]; then
   echo "Missing SSM parameters: $missing"
@@ -81,4 +82,4 @@ printf '  %s\n' "${TIMES[@]}"
 printf '  %-28s %3dm%02ds\n' "Total (after 'yes')" $(((SECONDS - T0) / 60)) $(((SECONDS - T0) % 60))
 echo
 echo "Platform is up. Run ./scripts/verify.sh in ~5 minutes (install-time noise settles)."
-echo "ArgoCD admin password: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo"
+echo "ArgoCD: kubectl port-forward -n argocd svc/argocd-server 8080:443, then https://localhost:8080 → LOG IN VIA GITHUB"

@@ -1,12 +1,26 @@
 # Minimal ArgoCD for the lab
 dex:
-  enabled: false        # no SSO yet; we log in as admin via port-forward
+  enabled: true         # GitHub login (connector in configs.cm."dex.config")
 notifications:
   enabled: false        # not needed yet; saves memory
 configs:
   params:
     application.namespaces: ""   # Applications only in the argocd namespace
   cm:
+    # Where people reach ArgoCD (kubectl port-forward). Dex's GitHub callback is
+    # <url>/api/dex/callback, and must match the OAuth App's callback URL exactly.
+    url: https://localhost:8080
+    # Credentials come from the argocd-dex-github Secret (External Secrets → SSM).
+    # No 'orgs' filter: any GitHub account can authenticate, but RBAC below gives
+    # unknown accounts no permissions at all. With a GitHub org: orgs + teams instead.
+    dex.config: |
+      connectors:
+        - type: github
+          id: github
+          name: GitHub
+          config:
+            clientID: $argocd-dex-github:clientID
+            clientSecret: $argocd-dex-github:clientSecret
     # Give Application objects a health status (removed from ArgoCD's defaults in 1.8).
     # Without it, the root app treats a child app as done as soon as it EXISTS, so sync
     # waves only order creation by seconds. With it, wave N+1 starts only when every
@@ -46,3 +60,17 @@ configs:
         end
       end
       return hs
+  # Who may do what in ArgoCD. Subjects are GitHub usernames (Dex's preferred_username
+  # claim). Prod is never synced by hand: promotion PRs + auto-sync change it.
+  rbac:
+    policy.default: ""                    # logged in but not listed → sees nothing
+    scopes: "[groups, preferred_username]"
+    policy.csv: |
+      # App developers: see web-dev and web-prod, sync and read logs in dev only
+      p, role:web-developer, applications, get, web/*, allow
+      p, role:web-developer, applications, sync, web/web-dev, allow
+      p, role:web-developer, logs, get, web/web-dev, allow
+      # Support / auditors: read-only on everything (built-in role)
+      # g, <github-user>, role:readonly
+      # Platform team
+      g, alp2003, role:admin
