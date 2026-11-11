@@ -1,6 +1,5 @@
 # Environment: prod. Changed only by a reviewed promotion PR (Step 6), never by the release bot.
 replicaCount: 2
-
 image:
-  tag: "0.1.0"
-  digest: sha256:02e68f6002855298da1b02dfbf7a6ceebf771b3ab446068d21dd182e4865b67f
+  tag: "0.1.3"
+  digest: sha256:f8b05c0b17713faa16c05b37b040cce1e40892bf6e975d8fb01fb480da405e57
