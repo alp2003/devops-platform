@@ -14,6 +14,45 @@ module "eks" {
 
   enable_cluster_creator_admin_permissions = true
 
+  # Role → Kubernetes permissions (roles in access.tf). AWS-managed access policies:
+  # View excludes Secrets; Edit allows changing workloads but not RBAC.
+  access_entries = {
+    admin = {
+      principal_arn = aws_iam_role.access["admin"].arn
+
+      policy_associations = {
+        cluster_admin = {
+          policy_arn   = "${local.eks_access_policy}/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+    developer = {
+      principal_arn = aws_iam_role.access["developer"].arn
+
+      policy_associations = {
+        edit_dev = {
+          policy_arn   = "${local.eks_access_policy}/AmazonEKSEditPolicy"
+          access_scope = { type = "namespace", namespaces = ["web-dev"] }
+        }
+        view_prod = {
+          policy_arn   = "${local.eks_access_policy}/AmazonEKSViewPolicy"
+          access_scope = { type = "namespace", namespaces = ["web-prod"] }
+        }
+      }
+    }
+    viewer = {
+      principal_arn = aws_iam_role.access["viewer"].arn
+
+      policy_associations = {
+        view = {
+          policy_arn   = "${local.eks_access_policy}/AmazonEKSViewPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  }
+
   enabled_log_types = ["api", "audit", "authenticator"]
 
   cloudwatch_log_group_retention_in_days = 7
