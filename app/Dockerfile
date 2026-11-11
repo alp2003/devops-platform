@@ -26,11 +26,18 @@ LABEL org.opencontainers.image.title="web" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.revision="${APP_COMMIT}" \
       org.opencontainers.image.source="https://github.com/alp2003/devops-platform"
-# pip and apt are install-time tools: the app needs neither at runtime, so every CVE in
-# them (or in the libraries they vendor) is pure risk. pip: ask Python where ensurepip
-# lives instead of hardcoding the version. apt: marked "protected" in Debian, hence the
-# force flags; dpkg itself stays (it is Essential, and owns the package database).
-RUN python -m pip uninstall -y pip \
+# 1. Debian security updates: the pinned base image can lag behind published fixes
+#    (zlib CVE-2026-76844 on 2026-11-11). Applied at build time; the released image is
+#    still pinned by digest, so deploys stay reproducible.
+# 2. pip and apt are install-time tools: the app needs neither at runtime, so every CVE in
+#    them (or in the libraries they vendor) is pure risk. pip: ask Python where ensurepip
+#    lives instead of hardcoding the version. apt: marked "protected" in Debian, hence the
+#    force flags; dpkg itself stays (it is Essential, and owns the package database).
+#    apt is used once (step 1) and removed in the same layer.
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get clean \
+ && python -m pip uninstall -y pip \
  && rm -rf "$(python -c 'import ensurepip, os; print(os.path.dirname(ensurepip.__file__))')" \
  && dpkg --purge --force-remove-essential --force-remove-protected \
       apt $(dpkg-query -W -f '${Package}\n' 'libapt-pkg*') \
