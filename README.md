@@ -146,6 +146,7 @@ scripts/            up, down, verify, secrets-init, endpoint pin, cost check
 | Bring up | `./scripts/up.sh` | ~20 min. Checks the SSM secrets and your public IP first, then asks only to confirm the Terraform plan. Pins the API endpoint only if one of its IPs is unreachable. |
 | Wait | (done by `up.sh`) | `up.sh` waits until all 13 apps are **Synced / Healthy** and prints how long each phase took; `watch -n 10 'kubectl get applications -n argocd'` shows the waves live |
 | Verify | `./scripts/verify.sh` | **Run it ~5 minutes after everything is Healthy.** Right after install, Helm hook jobs are still finishing and the Prometheus Operator logs webhook `bad certificate` errors until its certificate is patched in (install-time, stops on its own). |
+| Access | `./scripts/access-check.sh` | adds `platform-admin`, `platform-developer` and `platform-viewer` kubeconfig contexts (each assumes its IAM role) and checks 20 allowed/denied actions with `kubectl auth can-i`. Model in `infra/eks/access.tf`. |
 | Release | `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z` | admin only; opens the dev deploy PR automatically |
 | Promote | `gh workflow run promote.yaml -f version=X.Y.Z` | refuses if dev does not run that version; opens a PR copying dev's exact digest to prod |
 | Roll back | `gh pr revert <promotion PR>` | merge it: ArgoCD returns prod to the previous digest |
